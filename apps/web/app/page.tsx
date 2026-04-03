@@ -4,9 +4,16 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { AnomalyMap } from "../components/anomaly-map";
 import {
+  type DashboardHydrationState,
   createUnavailableDashboardState,
   loadDashboardState,
 } from "../lib/api";
+import type {
+  AiAssistantResponse,
+  AiAssistantSummary,
+  AiModuleContext,
+  AiSeverity,
+} from "../lib/ai-assistant";
 
 // ─── Feature types ─────────────────────────────────────────────────────────────
 type FeatureId =
@@ -110,7 +117,7 @@ const FAQ_ITEMS = [
     id: "assistant",
     question: "Что будет делать AI Assistant?",
     answer:
-      "После подключения ChatGPT API он станет правой точкой входа для сводок, объяснений по районам, управленческих рекомендаций и генерации коротких отчётов.",
+      "После подключения Gemini API он станет правой точкой входа для сводок, объяснений по районам, управленческих рекомендаций и генерации коротких отчётов.",
   },
   {
     id: "demo",
@@ -128,30 +135,363 @@ type ChatMessage = {
   ts: Date;
 };
 
+const AI_MODULE_CHIPS: Array<{ label: string; featureId: FeatureId }> = [
+  { label: "CH4", featureId: "ch4-map" },
+  { label: "ДТП", featureId: "cv-accidents" },
+  { label: "Воздух", featureId: "air-quality" },
+  { label: "Риски", featureId: "risk-workflow" },
+  { label: "Прогноз", featureId: "forecast-center" },
+  { label: "Отчёт", featureId: "report-studio" },
+];
+
+function buildAiModuleContext(
+  featureId: FeatureId,
+  dashboardState: DashboardHydrationState,
+): AiModuleContext {
+  const feature = FEATURES.find((item) => item.id === featureId) ?? FEATURES[0];
+  const leadAnomaly = dashboardState.anomalies[0];
+  const ch4Delta =
+    leadAnomaly?.methaneDeltaPct !== undefined
+      ? `+${Math.round(leadAnomaly.methaneDeltaPct)}%`
+      : "+12%";
+  const openIncidents = Object.keys(dashboardState.incidents).length || 2;
+
+  switch (featureId) {
+    case "ch4-map":
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Высокая",
+        severityReasonHint:
+          "Отклонение CH4 уже выше локального фона и требует приоритетной проверки.",
+        metrics: [
+          {
+            label: "Аномалий в срезе",
+            value: String(dashboardState.anomalies.length || 4),
+            detail: "Точки отклонения, попавшие в рабочий screening слой.",
+          },
+          {
+            label: "Отклонение к базе",
+            value: ch4Delta,
+            detail: "Насколько текущий CH4 выше базового уровня по зоне.",
+          },
+          {
+            label: "Зон мониторинга",
+            value: "7",
+            detail: "Районы и контуры, которые сейчас находятся в спутниковом обзоре.",
+          },
+          {
+            label: "Последнее обновление",
+            value: "2 мин назад",
+            detail: "Свежесть mock-среза для демо.",
+          },
+        ],
+        findings: [
+          `${leadAnomaly?.verificationArea ?? "Алматы"} показывает отклонение CH4 на ${ch4Delta} к базовому профилю.`,
+          `${dashboardState.anomalies.length || 4} точек уже попали в screening-очередь и требуют проверки.`,
+          "Контур работает как intelligence layer: он показывает, где искать проблему в первую очередь.",
+        ],
+        recommendedFocus: [
+          "Подтвердить приоритетную зону и сверить спутниковый сигнал с полевыми данными.",
+          "Поднять кейс в incident workflow, если отклонение сохраняется.",
+          "Подготовить короткий отчёт по зоне, owner и статусу проверки.",
+        ],
+        crossModuleSignals: [
+          "Если рост CH4 совпадает с инфраструктурным инцидентом или жалобами, кейс нужно переводить в risk queue и отчётный контур.",
+          "Сводка полезна не сама по себе, а как вход в приоритизацию выездных действий.",
+        ],
+      };
+    case "cv-accidents":
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Высокая",
+        severityReasonHint:
+          "Есть дорожные события с высокой нагрузкой и коротким окном реакции для служб.",
+        metrics: [
+          {
+            label: "Камер активно",
+            value: "342",
+            detail: "Камеры, которые участвуют в контуре Computer Vision.",
+          },
+          {
+            label: "Инцидентов / 24ч",
+            value: "8",
+            detail: "События, попавшие в очередь за последние сутки.",
+          },
+          {
+            label: "Ср. время реакции",
+            value: "6.2 мин",
+            detail: "Среднее время между детекцией и реакцией службы.",
+          },
+          {
+            label: "Нарушений ПДД",
+            value: "124",
+            detail: "Автоматически классифицированные нарушения.",
+          },
+        ],
+        findings: [
+          "Computer Vision фиксирует аварийные и перегруженные участки на ключевых перекрёстках города.",
+          "Среднее время реакции служб уже измеряется и может использоваться для SLA-контроля.",
+          "Модуль помогает не просто видеть ДТП, а быстро показать штабный приоритет.",
+        ],
+        recommendedFocus: [
+          "Приоритизировать перекрёстки с повторяющимися инцидентами.",
+          "Сверить задержки реагирования со схемой движения и нагрузкой полос.",
+          "Отправить краткую сводку в risk queue для участков с повторными кейсами.",
+        ],
+        crossModuleSignals: [
+          "Перегруженные дороги усиливают выбросы и ухудшают воздух, поэтому транспортный и экологический контуры нужно читать вместе.",
+          "Повторяемые ДТП могут быть связаны не только с трафиком, но и с качеством покрытия и освещения.",
+        ],
+      };
+    case "air-quality":
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Высокая",
+        severityReasonHint:
+          "AQI уже вышел в нездоровый диапазон для уязвимых групп и требует управленческой реакции.",
+        metrics: [
+          {
+            label: "AQI Алматы",
+            value: "112",
+            detail: "Городской индекс качества воздуха в текущем срезе.",
+          },
+          {
+            label: "PM2.5",
+            value: "80",
+            detail: "Повышенная концентрация мелких частиц в приоритетной зоне.",
+          },
+          {
+            label: "Тренд",
+            value: "растёт",
+            detail: "Ситуация ухудшается, а не стабилизируется.",
+          },
+          {
+            label: "Районов под риском",
+            value: "3",
+            detail: "Алатауский, Турксибский и Ауэзовский в фокусе.",
+          },
+        ],
+        findings: [
+          "Качество воздуха в Алматы ухудшается, а индекс AQI вышел выше комфортного диапазона.",
+          "Наиболее напряжённые районы требуют не только мониторинга, но и немедленных мер для города.",
+          "Контур полезен тем, что сразу связывает показатель с управленческими действиями.",
+        ],
+        recommendedFocus: [
+          "Ограничить транспортный поток на перегруженных участках в часы пика.",
+          "Предупредить жителей и усилить полевой мониторинг по приоритетным районам.",
+          "Сверить вклад ТЭЦ, трафика и локальных источников для адресной реакции.",
+        ],
+        crossModuleSignals: [
+          "Высокая дорожная нагрузка и дефекты покрытия могут одновременно усиливать пробку и загрязнение воздуха.",
+          "Экологическая сводка должна входить в общую risk queue, а не жить отдельно от транспортного контура.",
+        ],
+      };
+    case "risk-workflow":
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Высокая",
+        severityReasonHint:
+          "В очереди уже несколько красных кейсов, и просрочка по SLA быстро снижает управляемость.",
+        metrics: [
+          {
+            label: "В очереди",
+            value: "6",
+            detail: "Кейсы, которые ждут решения в risk queue.",
+          },
+          {
+            label: "Красных кейсов",
+            value: "3",
+            detail: "Самые приоритетные сигналы в текущем контуре.",
+          },
+          {
+            label: "Средний SLA",
+            value: "1.8ч",
+            detail: "Окно обработки по текущему сценарию.",
+          },
+          {
+            label: "Открытых инцидентов",
+            value: String(openIncidents),
+            detail: "Инциденты, уже поднятые из сигналов в workflow.",
+          },
+        ],
+        findings: [
+          "Risk queue собирает сигналы в единый operational workflow и не даёт им потеряться между службами.",
+          "Часть кейсов уже в красной зоне и требует owner, SLA и понятного следующего шага.",
+          "Именно здесь платформа перестаёт быть просто дашбордом и становится рабочим инструментом.",
+        ],
+        recommendedFocus: [
+          "Зафиксировать owner и срок реакции по каждому красному кейсу.",
+          "Дотянуть критичные кейсы до задач и отчёта, а не оставлять на уровне сигнала.",
+          "Использовать очередь как единый вход для межмодульных проблем города.",
+        ],
+        crossModuleSignals: [
+          "Risk queue связывает CH4, ДТП, воздух, прогноз и отчёт в один управленческий контур.",
+          "Без этой очереди модули живут отдельно и не дают цельной реакции штабу.",
+        ],
+      };
+    case "forecast-center":
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Средняя",
+        severityReasonHint:
+          "Риск ещё прогнозный, но окна перегруза уже видны и позволяют действовать заранее.",
+        metrics: [
+          {
+            label: "Окон риска",
+            value: "4",
+            detail: "Временные интервалы, где нагрузка выходит из нормы.",
+          },
+          {
+            label: "Сценариев",
+            value: "12",
+            detail: "Варианты развития ситуации в demo-модели.",
+          },
+          {
+            label: "Резерв нужен",
+            value: "2 зоны",
+            detail: "Районы, где стоит заранее подготовить ресурс.",
+          },
+          {
+            label: "Точность",
+            value: "89%",
+            detail: "Качество forecast-модуля на mock-наборе.",
+          },
+        ],
+        findings: [
+          "Forecast center показывает, где город выйдет из нормы ещё до фактического перегруза.",
+          "Следующее напряжённое окно видно заранее, поэтому штаб может работать превентивно.",
+          "Этот контур нужен для подготовки резерва, а не для постфактум-отчёта.",
+        ],
+        recommendedFocus: [
+          "Заранее перераспределить ресурс в зоны ожидаемой перегрузки.",
+          "Подготовить резервные схемы по транспорту и энергетике.",
+          "Сверять прогноз с risk queue, чтобы обновлять приоритеты до эскалации.",
+        ],
+        crossModuleSignals: [
+          "Прогноз нужен, чтобы транспорт, воздух и инфраструктура не уходили в красную зону одновременно.",
+          "Он усиливает другие модули именно тем, что даёт время на реакцию.",
+        ],
+      };
+    case "report-studio":
+    default:
+      return {
+        featureId,
+        featureLabel: feature.label,
+        overview: feature.overview,
+        defaultSeverity: "Средняя",
+        severityReasonHint:
+          "Отчётный контур не аварийный сам по себе, но без него руководитель не получает зафиксированного решения.",
+        metrics: [
+          {
+            label: "Готовых пакетов",
+            value: "3",
+            detail: "Собранные наборы для показа, отправки и архива.",
+          },
+          {
+            label: "Проверок качества",
+            value: "4",
+            detail: "Контроль целостности данных перед экспортом.",
+          },
+          {
+            label: "Экспортов",
+            value: "PDF / DOCX",
+            detail: "Форматы выходного документа.",
+          },
+          {
+            label: "Готовность",
+            value: "92%",
+            detail: "Насколько пакет пригоден к выпуску без ручной доработки.",
+          },
+        ],
+        findings: [
+          "Report Studio закрывает цикл: сигнал и инцидент превращаются в формальный выходной документ.",
+          "Контур качества показывает, насколько пакет данных пригоден для руководства и архива.",
+          "Без этого слоя продукт выглядит как мониторинг, а не как управленческий инструмент.",
+        ],
+        recommendedFocus: [
+          "Дотянуть ключевые кейсы до экспортируемого пакета без ручных пробелов.",
+          "Сверять качество данных перед выпуском для руководства.",
+          "Использовать отчёт как финальную фиксацию действий, owner и результата.",
+        ],
+        crossModuleSignals: [
+          "Отчётный модуль нужен всем остальным контурам: без него транспорт, воздух и risk queue не дают завершённого результата.",
+          "Именно он переводит аналитику в документированное решение для акимата.",
+        ],
+      };
+  }
+}
+
+function getSeverityTone(severity: AiSeverity) {
+  switch (severity) {
+    case "Критическая":
+      return "critical";
+    case "Высокая":
+      return "high";
+    case "Средняя":
+      return "medium";
+    default:
+      return "low";
+  }
+}
+
+function getSeverityLabel(severity: AiSeverity) {
+  switch (severity) {
+    case "Критическая":
+      return "Критическая срочность";
+    case "Высокая":
+      return "Высокая срочность";
+    case "Средняя":
+      return "Средняя срочность";
+    default:
+      return "Низкая срочность";
+  }
+}
+
+function getSeverityHelp(severity: AiSeverity) {
+  switch (severity) {
+    case "Критическая":
+      return "Критическая = нужен немедленный разбор и координация служб прямо сейчас.";
+    case "Высокая":
+      return "Высокая = нужен приоритетный разбор сегодня или в ближайшие часы; откладывать не стоит.";
+    case "Средняя":
+      return "Средняя = ситуацию уже стоит проверить и подготовить меры, но это ещё не аварийный режим.";
+    default:
+      return "Низкая = достаточно наблюдения и плановой проверки без срочной эскалации.";
+  }
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 export default function Page() {
   const [activeFeature, setActiveFeature] = useState<FeatureId>("ch4-map");
   const [chatOpen, setChatOpen] = useState(true);
   const [selectedFaq, setSelectedFaq] = useState<string>(FAQ_ITEMS[0].id);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "Я AI Assistant Smart City Management. Сейчас справа demo-rail. После подключения ChatGPT API здесь будут сводки, объяснения и управленческие рекомендации.",
-      ts: new Date(),
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState<AiAssistantSummary | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const [anomalies, setAnomalies] = useState(createUnavailableDashboardState().anomalies);
+  const [dashboardState, setDashboardState] = useState<DashboardHydrationState>(
+    createUnavailableDashboardState(),
+  );
   const [dashLoaded, setDashLoaded] = useState(false);
 
   useEffect(() => {
     loadDashboardState()
       .then((state) => {
-        setAnomalies(state.anomalies);
+        setDashboardState(state);
         setDashLoaded(true);
       })
       .catch(() => {
@@ -162,6 +502,85 @@ export default function Page() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  const anomalies = dashboardState.anomalies;
+  const activeF = FEATURES.find((f) => f.id === activeFeature)!;
+  const activeModuleContext = buildAiModuleContext(activeFeature, dashboardState);
+  const visibleSummary =
+    aiSummary ?? {
+      whatIsHappening: activeModuleContext.findings.slice(0, 2).join(" "),
+      severity: activeModuleContext.defaultSeverity,
+      severityReason: activeModuleContext.severityReasonHint,
+      recommendedActions: activeModuleContext.recommendedFocus.slice(0, 3),
+      crossModuleInsight: activeModuleContext.crossModuleSignals[0],
+    };
+
+  const requestAiAssistant = async ({
+    module,
+    question,
+    mode,
+  }: {
+    module: AiModuleContext;
+    question?: string;
+    mode: "summary" | "chat";
+  }) => {
+    if (mode === "summary") {
+      setSummaryLoading(true);
+      setAiSummary(null);
+    } else {
+      setChatLoading(true);
+    }
+    setAiError(null);
+
+    try {
+      const response = await fetch("/api/ai-assistant", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          module,
+          question: question?.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("AI route returned a non-success status.");
+      }
+
+      const payload = (await response.json()) as AiAssistantResponse;
+      setAiSummary(payload.summary);
+
+      if (mode === "chat") {
+        const botMsg: ChatMessage = {
+          id: `b-${Date.now()}`,
+          role: "assistant",
+          text: payload.assistantMessage,
+          ts: new Date(),
+        };
+        setChatMessages((prev) => [...prev, botMsg]);
+      }
+    } catch {
+      setAiError("AI сейчас недоступен. Показана базовая сводка.");
+    } finally {
+      if (mode === "summary") {
+        setSummaryLoading(false);
+      } else {
+        setChatLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!dashLoaded) {
+      return;
+    }
+
+    void requestAiAssistant({
+      module: buildAiModuleContext(activeFeature, dashboardState),
+      mode: "summary",
+    });
+  }, [activeFeature, dashLoaded, dashboardState]);
 
   const sendChat = async () => {
     const text = chatInput.trim();
@@ -175,35 +594,13 @@ export default function Page() {
       ts: new Date(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
-    setChatLoading(true);
-
-    // Demo fallback — в реальном проекте заменить на вызов ChatGPT API
-    await new Promise((r) => setTimeout(r, 900 + Math.random() * 600));
-    const replies: Record<string, string> = {
-      ch4: "По данным спутника Sentinel-5P, уровень CH₄ в Бостандыкском районе сейчас на 12% выше базового. Рекомендую проверить газопроводную инфраструктуру.",
-      дтп: "За последние 24 часа компьютерное зрение зафиксировало 3 инцидента на пересечении Аль-Фараби и Навои. Средняя задержка прибытия экстренных служб — 8 мин.",
-      воздух: "Индекс AQI в Алатауском районе сейчас 142 (Нездоровый). Основные источники: выбросы ТЭЦ-2 и трафик на Рыскулова. Рекомендую временные ограничения движения.",
-      риск: "В очереди рисков сейчас лидируют транспорт, коммунальные сети и экология. По красным кейсам нужен owner, SLA и запуск incident workflow.",
-      прогноз: "Следующее напряжённое окно ожидается вечером: транспорт и энергетика выходят выше базового профиля. Стоит заранее включить резервные схемы.",
-      отч: "Пакет для руководства может включать короткую сводку, расширенный DOCX и экспорт сырых данных с метками качества.",
-    };
-    const key = Object.keys(replies).find((k) => text.toLowerCase().includes(k));
-    const botText =
-      key
-        ? replies[key]
-        : `Анализирую данные по запросу: "${text}". Сейчас город функционирует в штатном режиме. Критических отклонений по выбранным модулям не выявлено.`;
-
-    const botMsg: ChatMessage = {
-      id: `b-${Date.now()}`,
-      role: "assistant",
-      text: botText,
-      ts: new Date(),
-    };
-    setChatMessages((prev) => [...prev, botMsg]);
-    setChatLoading(false);
+    await requestAiAssistant({
+      module: activeModuleContext,
+      question: text,
+      mode: "chat",
+    });
   };
 
-  const activeF = FEATURES.find((f) => f.id === activeFeature)!;
   const selectedFaqItem = FAQ_ITEMS.find((item) => item.id === selectedFaq) ?? FAQ_ITEMS[0];
   const shellStyle = {
     "--feature-color": activeF.color,
@@ -240,17 +637,6 @@ export default function Page() {
             </button>
           ))}
         </nav>
-
-        <div className="scm-sidebar-footer">
-          <button
-            className={`scm-chat-trigger ${chatOpen ? "scm-chat-trigger-active" : ""}`}
-            onClick={() => setChatOpen((v) => !v)}
-            type="button"
-          >
-            <span className="scm-chat-trigger-full">AI Ассистент</span>
-            <span className="scm-chat-trigger-mini">AI</span>
-          </button>
-        </div>
       </aside>
 
       {/* ── MAIN CONTENT ─────────────────────────────────────── */}
@@ -273,12 +659,16 @@ export default function Page() {
             </p>
             <div className="scm-hero-pill-row">
               {FEATURES.map((feature) => (
-                <span
+                <button
                   key={feature.id}
                   className={`scm-hero-pill ${activeFeature === feature.id ? "scm-hero-pill-active" : ""}`}
+                  onClick={() => setActiveFeature(feature.id)}
+                  aria-pressed={activeFeature === feature.id}
+                  aria-label={`Открыть модуль ${feature.label}`}
+                  type="button"
                 >
                   {feature.short}
-                </span>
+                </button>
               ))}
             </div>
             <div className="scm-hero-stats">
@@ -298,11 +688,6 @@ export default function Page() {
           </div>
           <div className="scm-hero-visual">
             <HeroGlobe activeFeature={activeFeature} />
-            <article className="scm-hero-focus">
-              <span>{activeF.short}</span>
-              <strong>{activeF.label}</strong>
-              <p>{activeF.overview}</p>
-            </article>
           </div>
         </section>
 
@@ -371,24 +756,92 @@ export default function Page() {
           <div>
             <strong>
               AI Ассистент
-              <HelpHint text="Это правый слайдбар под будущий ChatGPT API. Сейчас здесь demo-режим: можно проверить, как будет выглядеть диалоговый помощник." />
+              <HelpHint text="Это правый AI rail: он собирает управленческую сводку по активному модулю, оценивает срочность и предлагает действия." />
             </strong>
-            <span>ChatGPT API позже</span>
           </div>
           <button className="scm-chatbot-close" onClick={() => setChatOpen(false)} type="button">
             ✕
           </button>
         </div>
 
+        <section className="scm-ai-summary">
+          <div className="scm-ai-summary-head">
+            <div className="scm-ai-summary-heading">
+              <span className="scm-ai-summary-kicker">AI Сводка</span>
+              <HelpHint text="AI делает три вещи: кратко объясняет ситуацию, показывает срочность и предлагает конкретные действия." />
+            </div>
+            <div className="scm-ai-summary-severity">
+              <span className={`scm-ai-summary-badge scm-ai-summary-${getSeverityTone(visibleSummary.severity)}`}>
+                {getSeverityLabel(visibleSummary.severity)}
+              </span>
+              <HelpHint text={getSeverityHelp(visibleSummary.severity)} />
+            </div>
+          </div>
+
+          <div className="scm-ai-summary-block">
+            <div className="scm-ai-summary-label">
+              <span>Что происходит</span>
+              <HelpHint text="Короткая аналитическая интерпретация входных данных по текущему модулю." />
+            </div>
+            <p>{summaryLoading ? "AI анализирует активный модуль..." : visibleSummary.whatIsHappening}</p>
+          </div>
+
+          <div className="scm-ai-summary-grid">
+            <div className="scm-ai-summary-card">
+              <div className="scm-ai-summary-label">
+                <span>Срочность</span>
+                <HelpHint text="Насколько срочно акимату или штабу нужно реагировать на текущую ситуацию." />
+              </div>
+              <strong>{getSeverityLabel(visibleSummary.severity)}</strong>
+              <p>{visibleSummary.severityReason}</p>
+            </div>
+
+            <div className="scm-ai-summary-card">
+              <div className="scm-ai-summary-label">
+                <span>Связь с модулями</span>
+                <HelpHint text="Как текущий модуль связан с другими контурами города и почему это важно для решения." />
+              </div>
+              <p>{visibleSummary.crossModuleInsight}</p>
+            </div>
+          </div>
+
+          <div className="scm-ai-summary-block">
+            <div className="scm-ai-summary-label">
+              <span>Рекомендуемые действия</span>
+              <HelpHint text="Три конкретных шага, которые стоит сделать штабу или государству прямо сейчас." />
+            </div>
+            <div className="scm-ai-actions">
+              {visibleSummary.recommendedActions.map((item, index) => (
+                <div className="scm-ai-action" key={`${item}-${index}`}>
+                  <span>{index + 1}</span>
+                  <p>{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {aiError ? <p className="scm-ai-summary-note">{aiError}</p> : null}
+        </section>
+
         <div className="scm-chatbot-chips">
-          {["CH4", "ДТП", "Воздух", "Риски", "Прогноз", "Отчёт"].map((chip) => (
+          {AI_MODULE_CHIPS.map((chip) => (
             <button
-              key={chip}
-              className="scm-chat-chip"
-              onClick={() => setChatInput(chip)}
+              key={chip.featureId}
+              className={`scm-chat-chip ${activeFeature === chip.featureId ? "scm-chat-chip-active" : ""}`}
+              onClick={() => {
+                if (chip.featureId === activeFeature) {
+                  void requestAiAssistant({
+                    module: buildAiModuleContext(chip.featureId, dashboardState),
+                    mode: "summary",
+                  });
+                  return;
+                }
+
+                setActiveFeature(chip.featureId);
+              }}
               type="button"
             >
-              {chip}
+              {chip.label}
             </button>
           ))}
         </div>
@@ -412,7 +865,7 @@ export default function Page() {
         <div className="scm-chatbot-input-row">
           <input
             className="scm-chatbot-input"
-            placeholder="Спросите что-нибудь..."
+            placeholder="Задайте вопрос по текущему модулю..."
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void sendChat(); }}
@@ -447,12 +900,12 @@ export default function Page() {
 // ─── Hero Globe decoration ───────────────────────────────────────────────────────
 function HeroGlobe({ activeFeature }: { activeFeature: FeatureId }) {
   const orbitNodes = [
-    { top: "8%", left: "49%", short: FEATURES[0].short, id: FEATURES[0].id, color: FEATURES[0].color },
-    { top: "24%", left: "76%", short: FEATURES[1].short, id: FEATURES[1].id, color: FEATURES[1].color },
-    { top: "58%", left: "80%", short: FEATURES[2].short, id: FEATURES[2].id, color: FEATURES[2].color },
-    { top: "74%", left: "54%", short: FEATURES[3].short, id: FEATURES[3].id, color: FEATURES[3].color },
-    { top: "60%", left: "20%", short: FEATURES[4].short, id: FEATURES[4].id, color: FEATURES[4].color },
-    { top: "24%", left: "18%", short: FEATURES[5].short, id: FEATURES[5].id, color: FEATURES[5].color },
+    { top: "12%", left: "50%", feature: FEATURES[0] },
+    { top: "30%", left: "78%", feature: FEATURES[1] },
+    { top: "68%", left: "78%", feature: FEATURES[2] },
+    { top: "86%", left: "50%", feature: FEATURES[3] },
+    { top: "68%", left: "22%", feature: FEATURES[4] },
+    { top: "30%", left: "22%", feature: FEATURES[5] },
   ] as const;
 
   return (
@@ -464,17 +917,24 @@ function HeroGlobe({ activeFeature }: { activeFeature: FeatureId }) {
         <div className="scm-globe-core">
           <strong>ALMATY</strong>
           <span>Ядро города</span>
+          <HelpHint
+            className="scm-globe-core-help"
+            text="Это центральное ядро платформы Алматы. Вокруг него расположены 6 отдельных городских модулей управления."
+          />
         </div>
         {orbitNodes.map((dot, i) => (
           <div
-            key={dot.id}
-            className={`scm-globe-node ${dot.id === activeFeature ? "scm-globe-node-active" : ""}`}
-            style={{ top: dot.top, left: dot.left, "--node-color": dot.color, animationDelay: `${i * 0.18}s` } as CSSProperties}
-            title={FEATURES.find((feature) => feature.id === dot.id)?.label}
+            key={dot.feature.id}
+            className={`scm-globe-node ${dot.feature.id === activeFeature ? "scm-globe-node-active" : ""}`}
+            style={{ top: dot.top, left: dot.left, "--node-color": dot.feature.color, animationDelay: `${i * 0.18}s` } as CSSProperties}
           >
             <div className="scm-globe-dot">
-              <span>{dot.short}</span>
+              <span>{dot.feature.short}</span>
             </div>
+            <HelpHint
+              className="scm-globe-node-help"
+              text={`${dot.feature.short} — ${dot.feature.label}. ${dot.feature.help}`}
+            />
           </div>
         ))}
       </div>
@@ -954,7 +1414,7 @@ function ReportStudioPanel() {
 }
 
 // ─── Shared components ───────────────────────────────────────────────────────────
-function HelpHint({ text }: { text: string }) {
+function HelpHint({ text, className }: { text: string; className?: string }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -1010,7 +1470,7 @@ function HelpHint({ text }: { text: string }) {
       <button
         aria-expanded={isOpen}
         aria-label={text}
-        className="scm-help"
+        className={["scm-help", className].filter(Boolean).join(" ")}
         onBlur={() => setIsOpen(false)}
         onClick={() => setIsOpen((current) => !current)}
         onFocus={() => setIsOpen(true)}
