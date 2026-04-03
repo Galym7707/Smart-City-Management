@@ -1,0 +1,11 @@
+{
+  "name": "duo-galym-dauren-project",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=@duo/web",
+    "build:web": "npm run build --workspace=@duo/web"
+  }
+}
