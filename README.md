@@ -1,13 +1,11 @@
 ---
-title: Saryna MRV
 sdk: docker
 app_port: 7860
 fullWidth: true
 ---
 
-# Saryna MRV
 
-Saryna MRV is a methane and flaring workflow demo for Kazakhstan oil and gas operations.
+It is a methane and flaring workflow demo for Kazakhstan oil and gas operations.
 
 The product focus is not a map by itself. The core loop is:
 
