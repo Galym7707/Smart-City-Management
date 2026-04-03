@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Almaty Air Quality Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.1.0/fonts/remixicon.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <i class="ri-leaf-line"></i>
+                    <span>AirAlmaty</span>
+                </div>
+                <span class="badge">AI-Powered</span>
+            </div>
+            <div class="header-right">
+                <div class="last-update" id="lastUpdate">
+                    <i class="ri-refresh-line"></i>
+                    <span>Загрузка...</span>
+                </div>
+                <button class="btn-refresh" id="btnRefresh" title="Обновить данные">
+                    <i class="ri-refresh-line"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Top: AQI Hero Card -->
+            <section class="hero-section">
+                <div class="aqi-hero-card" id="aqiHeroCard">
+                    <div class="aqi-hero-left">
+                        <div class="city-name">
+                            <i class="ri-map-pin-2-fill"></i>
+                            <h1>Алматы</h1>
+                        </div>
+                        <div class="aqi-big-number" id="aqiBigNumber">--</div>
+                        <div class="aqi-label">Air Quality Index</div>
+                        <div class="aqi-category" id="aqiCategory">
+                            <span class="category-dot"></span>
+                            <span class="category-text">Загрузка...</span>
+                        </div>
+                    </div>
+                    <div class="aqi-hero-right">
+                        <div class="aqi-gauge-container">
+                            <canvas id="aqiGauge" width="220" height="220"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Metric Cards Row -->
+            <section class="metrics-row">
+                <div class="metric-card" id="cardPm25">
+                    <div class="metric-icon pm25-icon">
+                        <i class="ri-blur-off-fill"></i>
+                    </div>
+                    <div class="metric-info">
+                        <span class="metric-label">PM2.5</span>
+                        <span class="metric-value" id="valPm25">--</span>
+                        <span class="metric-unit">μg/m³</span>
+                    </div>
+                    <div class="metric-status" id="statusPm25">--</div>
+                </div>
+                <div class="metric-card" id="cardPm10">
+                    <div class="metric-icon pm10-icon">
+                        <i class="ri-windy-fill"></i>
+                    </div>
+                    <div class="metric-info">
+                        <span class="metric-label">PM10</span>
+                        <span class="metric-value" id="valPm10">--</span>
+                        <span class="metric-unit">μg/m³</span>
+                    </div>
+                    <div class="metric-status" id="statusPm10">--</div>
+                </div>
+                <div class="metric-card" id="cardStations">
+                    <div class="metric-icon stations-icon">
+                        <i class="ri-base-station-fill"></i>
+                    </div>
+                    <div class="metric-info">
+                        <span class="metric-label">Станции</span>
+                        <span class="metric-value" id="valStations">--</span>
+                        <span class="metric-unit">активных</span>
+                    </div>
+                    <div class="metric-status neutral">Мониторинг</div>
+                </div>
+            </section>
+
+            <!-- Charts & Info Row -->
+            <section class="charts-row">
+                <!-- Source Comparison Chart -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <h3><i class="ri-bar-chart-2-fill"></i> Сравнение источников</h3>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="sourceChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Pollutant Breakdown -->
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <h3><i class="ri-pie-chart-2-fill"></i> Состав загрязнителей</h3>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="pollutantChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AI Recommendations -->
+            <section class="recommendations-section">
+                <div class="rec-card">
+                    <div class="rec-header">
+                        <h3><i class="ri-robot-2-fill"></i> AI-рекомендации</h3>
+                        <span class="badge small">На основе текущих данных</span>
+                    </div>
+                    <div class="rec-body" id="recommendations">
+                        <div class="rec-loading">
+                            <i class="ri-loader-4-line spinning"></i>
+                            <span>Анализ данных...</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Source Details -->
+            <section class="sources-section">
+                <h3 class="section-title"><i class="ri-database-2-fill"></i> Детали по источникам</h3>
+                <div class="sources-grid">
+                    <div class="source-card airgradient">
+                        <div class="source-header">
+                            <span class="source-name">AirGradient</span>
+                            <span class="source-stations" id="agStations">-- станций</span>
+                        </div>
+                        <div class="source-metrics">
+                            <div class="source-metric">
+                                <span class="sm-label">PM2.5</span>
+                                <span class="sm-value" id="agPm25">--</span>
+                            </div>
+                            <div class="source-metric">
+                                <span class="sm-label">PM10</span>
+                                <span class="sm-value" id="agPm10">--</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="source-card iqair">
+                        <div class="source-header">
+                            <span class="source-name">IQAir</span>
+                            <span class="source-stations" id="iqStations">-- станций</span>
+                        </div>
+                        <div class="source-metrics">
+                            <div class="source-metric">
+                                <span class="sm-label">PM2.5</span>
+                                <span class="sm-value" id="iqPm25">--</span>
+                            </div>
+                            <div class="source-metric">
+                                <span class="sm-label">AQI</span>
+                                <span class="sm-value" id="iqAqi">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- AQI Scale Reference -->
+            <section class="scale-section">
+                <h3 class="section-title"><i class="ri-information-fill"></i> Шкала AQI</h3>
+                <div class="aqi-scale">
+                    <div class="scale-item good">
+                        <span class="scale-range">0-50</span>
+                        <span class="scale-label">Хорошо</span>
+                    </div>
+                    <div class="scale-item moderate">
+                        <span class="scale-range">51-100</span>
+                        <span class="scale-label">Умеренно</span>
+                    </div>
+                    <div class="scale-item sensitive">
+                        <span class="scale-range">101-150</span>
+                        <span class="scale-label">Вредно для чувствительных</span>
+                    </div>
+                    <div class="scale-item unhealthy">
+                        <span class="scale-range">151-200</span>
+                        <span class="scale-label">Вредно</span>
+                    </div>
+                    <div class="scale-item very-unhealthy">
+                        <span class="scale-range">201-300</span>
+                        <span class="scale-label">Очень вредно</span>
+                    </div>
+                    <div class="scale-item hazardous">
+                        <span class="scale-range">301+</span>
+                        <span class="scale-label">Опасно</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>AirAlmaty Dashboard &copy; 2026 &mdash; Данные: <a href="https://air.org.kz" target="_blank">air.org.kz</a></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
