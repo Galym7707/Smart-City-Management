@@ -8,6 +8,12 @@ import {
   createUnavailableDashboardState,
   loadDashboardState,
 } from "../lib/api";
+import {
+  type AlmatyAirSnapshot,
+  loadAlmatyAirSnapshot,
+  loadTrafficJamSnapshot,
+  type TrafficJamSnapshot,
+} from "../lib/city-signals";
 import type {
   AiAssistantResponse,
   AiAssistantSummary,
@@ -51,8 +57,8 @@ const FEATURES: Feature[] = [
     icon: "◎",
     short: "CV",
     label: "Computer Vision ДТП",
-    overview: "Видеоаналитика аварий, заторов и ETA служб.",
-    help: "Этот модуль нужен для видеоаналитики ДТП, перегруженных перекрёстков и оценки времени реакции служб.",
+    overview: "Подключённый CV-контур трафика, пробок и детекций транспорта.",
+    help: "Сейчас модуль читает реальный output из trafficjams: jam score, плотность потока и детекции транспорта по YOLOv8.",
     badge: "AI",
     color: "#ff8c52",
   },
@@ -61,8 +67,9 @@ const FEATURES: Feature[] = [
     icon: "◌",
     short: "AQI",
     label: "Воздух Алматы",
-    overview: "Качество воздуха и меры для города.",
-    help: "Здесь город видит AQI по районам и рекомендации, которые можно быстро переводить в управленческие меры.",
+    overview: "Live AQI Алматы, PM2.5/PM10 и health-риск для города.",
+    help: "Этот модуль читает реальный AIR API по Алматы и связывает качество воздуха с транспортной нагрузкой.",
+    badge: "LIVE",
     color: "#57d18e",
   },
   {
@@ -123,7 +130,7 @@ const FAQ_ITEMS = [
     id: "demo",
     question: "Данные на экране реальные?",
     answer:
-      "Сейчас это demo-макет с mock-данными, чтобы показать конечный интерфейс и весь operational loop без пустых состояний.",
+      "Сейчас экран смешанный: воздух подключён к live AIR API по Алматы, блок пробок читает реальный output trafficjams, остальные контуры пока остаются demo-workflow.",
   },
 ] as const;
 
@@ -144,9 +151,174 @@ const AI_MODULE_CHIPS: Array<{ label: string; featureId: FeatureId }> = [
   { label: "Отчёт", featureId: "report-studio" },
 ];
 
+const WHO_PM25_GUIDELINE = 15;
+
+type HealthInsight = {
+  severity: AiSeverity;
+  title: string;
+  summary: string;
+  actions: string[];
+  color: string;
+};
+
+function getAqiState(aqi: number) {
+  if (aqi <= 50) {
+    return { label: "Хорошо", color: "#4ade80", severity: "Низкая" as AiSeverity };
+  }
+  if (aqi <= 100) {
+    return { label: "Умеренно", color: "#ffcf70", severity: "Средняя" as AiSeverity };
+  }
+  if (aqi <= 150) {
+    return { label: "Вредно для чувствительных групп", color: "#ff9f3d", severity: "Высокая" as AiSeverity };
+  }
+  return { label: "Вредно для здоровья", color: "#ff5c4d", severity: "Критическая" as AiSeverity };
+}
+
+function getTrafficState(score: number) {
+  if (score >= 65) {
+    return { label: "Сильная пробка", color: "#ff5c4d", severity: "Высокая" as AiSeverity };
+  }
+  if (score >= 40) {
+    return { label: "Плотный поток", color: "#ff9f3d", severity: "Средняя" as AiSeverity };
+  }
+  if (score >= 20) {
+    return { label: "Лёгкая нагрузка", color: "#ffd05a", severity: "Средняя" as AiSeverity };
+  }
+  return { label: "Свободный поток", color: "#4ade80", severity: "Низкая" as AiSeverity };
+}
+
+function humanizeTrafficClass(className: "car" | "motorcycle" | "bus" | "truck") {
+  switch (className) {
+    case "car":
+      return "Автомобили";
+    case "motorcycle":
+      return "Мотоциклы";
+    case "bus":
+      return "Автобусы";
+    default:
+      return "Грузовики";
+  }
+}
+
+function getTrafficClassShortLabel(className: "car" | "motorcycle" | "bus" | "truck") {
+  switch (className) {
+    case "car":
+      return "Авто";
+    case "motorcycle":
+      return "Мото";
+    case "bus":
+      return "Автобус";
+    default:
+      return "Груз";
+  }
+}
+
+function formatAlmatyTime(value?: string) {
+  if (!value) {
+    return "нет данных";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "нет данных";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Almaty",
+  }).format(date);
+}
+
+function buildHealthInsight(
+  airSnapshot: AlmatyAirSnapshot | null,
+  trafficSnapshot: TrafficJamSnapshot | null,
+): HealthInsight {
+  const aqi = airSnapshot?.aqiAvg ?? 0;
+  const pm25 = airSnapshot?.pm25Avg ?? 0;
+  const jamScore = trafficSnapshot?.jam.score ?? 0;
+
+  if ((aqi >= 150 || pm25 >= 55) && jamScore >= 65) {
+    return {
+      severity: "Критическая",
+      title: "Критический риск для чувствительных групп",
+      summary:
+        "Высокое загрязнение воздуха совпадает с сильной пробкой. Для детей, пожилых и людей с астмой это повышает риск ухудшения самочувствия рядом с магистралями.",
+      actions: [
+        "Предупредить школы, детсады и поликлиники: сократить время детей и пожилых на улице.",
+        "Рекомендовать респираторы FFP2/N95 при необходимости выхода возле перегруженных дорог.",
+        "Сразу разгрузить проблемные участки и усилить мониторинг рядом с жилыми кварталами.",
+      ],
+      color: "#ff5c4d",
+    };
+  }
+
+  if ((aqi >= 100 || pm25 >= 35) && jamScore >= 40) {
+    return {
+      severity: "Высокая",
+      title: "Риск для детей и пожилых повышен",
+      summary:
+        "Воздух уже вышел в нездоровый диапазон для чувствительных групп, а плотный трафик усиливает выхлопы у дороги.",
+      actions: [
+        "Вынести предупреждение: детям, пожилым и людям с астмой сократить время на улице.",
+        "При необходимости выхода рекомендовать маски FFP2/N95 рядом с магистралями.",
+        "Снизить нагрузку на перегруженных участках и проверить режимы светофоров.",
+      ],
+      color: "#ff9f3d",
+    };
+  }
+
+  if (aqi >= 100 || pm25 >= 35) {
+    return {
+      severity: "Высокая",
+      title: "Воздух требует управленческой реакции",
+      summary:
+        "Основной риск сейчас даёт воздух: PM2.5 и AQI уже выше комфортного диапазона, поэтому уязвимые группы стоит беречь в первую очередь.",
+      actions: [
+        "Предупредить жителей о росте загрязнения и ограничить долгие активности на улице для чувствительных групп.",
+        "Рекомендовать маски FFP2/N95 возле дорог и в часы пика.",
+        "Усилить полевой мониторинг около школ, больниц и жилых магистралей.",
+      ],
+      color: "#ff9f3d",
+    };
+  }
+
+  if (aqi > 50 || jamScore >= 20) {
+    return {
+      severity: "Средняя",
+      title: "Ситуация под наблюдением",
+      summary:
+        "Пока это не аварийный режим, но воздух и трафик уже требуют наблюдения, чтобы не допустить ухудшения в часы пик.",
+      actions: [
+        "Проверять пиковые интервалы и держать готовыми предупредительные сообщения для жителей.",
+        "Следить за маршрутами около школ и медучреждений.",
+        "Сверять воздух и jam score в одном контуре перед эскалацией.",
+      ],
+      color: "#ffd05a",
+    };
+  }
+
+  return {
+    severity: "Низкая",
+    title: "Острых health-рисков сейчас не видно",
+    summary:
+      "Текущий уровень воздуха и дорожной нагрузки не указывает на острый риск, но мониторинг нужно продолжать.",
+    actions: [
+      "Продолжать фоновый мониторинг воздуха и трафика.",
+      "Проверять утренние и вечерние пики отдельно.",
+      "Обновлять сводку без дополнительных ограничений для жителей.",
+    ],
+    color: "#4ade80",
+  };
+}
+
 function buildAiModuleContext(
   featureId: FeatureId,
   dashboardState: DashboardHydrationState,
+  airSnapshot: AlmatyAirSnapshot | null,
+  trafficSnapshot: TrafficJamSnapshot | null,
 ): AiModuleContext {
   const feature = FEATURES.find((item) => item.id === featureId) ?? FEATURES[0];
   const leadAnomaly = dashboardState.anomalies[0];
@@ -155,6 +327,9 @@ function buildAiModuleContext(
       ? `+${Math.round(leadAnomaly.methaneDeltaPct)}%`
       : "+12%";
   const openIncidents = Object.keys(dashboardState.incidents).length || 2;
+  const airState = getAqiState(airSnapshot?.aqiAvg ?? 0);
+  const trafficState = getTrafficState(trafficSnapshot?.jam.score ?? 0);
+  const healthInsight = buildHealthInsight(airSnapshot, trafficSnapshot);
 
   switch (featureId) {
     case "ch4-map":
@@ -203,93 +378,105 @@ function buildAiModuleContext(
         ],
       };
     case "cv-accidents":
+      const trafficScore = Math.round(trafficSnapshot?.jam.score ?? 0);
+      const trafficDensity = Math.round((trafficSnapshot?.density ?? 0) * 100);
+      const trafficUpdatedAt = formatAlmatyTime(trafficSnapshot?.updatedAt);
+      const totalVehicles = trafficSnapshot?.totalCount ?? 0;
       return {
         featureId,
         featureLabel: feature.label,
         overview: feature.overview,
-        defaultSeverity: "Высокая",
+        defaultSeverity: trafficState.severity,
         severityReasonHint:
-          "Есть дорожные события с высокой нагрузкой и коротким окном реакции для служб.",
+          trafficScore >= 65
+            ? "CV-контур уже фиксирует сильную пробку и требует быстрой координации трафика."
+            : "Транспортный контур нужно держать под наблюдением, чтобы не допустить эскалации в часы пик.",
         metrics: [
           {
-            label: "Камер активно",
-            value: "342",
-            detail: "Камеры, которые участвуют в контуре Computer Vision.",
+            label: "Машин в кадре",
+            value: String(totalVehicles),
+            detail: "Сколько транспортных объектов детектор видит в последнем snapshot.",
           },
           {
-            label: "Инцидентов / 24ч",
-            value: "8",
-            detail: "События, попавшие в очередь за последние сутки.",
+            label: "Jam score",
+            value: `${trafficScore}%`,
+            detail: "Итоговый балл перегрузки из trafficjams.",
           },
           {
-            label: "Ср. время реакции",
-            value: "6.2 мин",
-            detail: "Среднее время между детекцией и реакцией службы.",
+            label: "Плотность",
+            value: `${trafficDensity}%`,
+            detail: "Какая доля кадра занята транспортом.",
           },
           {
-            label: "Нарушений ПДД",
-            value: "124",
-            detail: "Автоматически классифицированные нарушения.",
+            label: "Обновлено",
+            value: trafficUpdatedAt,
+            detail: "Время последнего snapshot из CV-модуля.",
           },
         ],
         findings: [
-          "Computer Vision фиксирует аварийные и перегруженные участки на ключевых перекрёстках города.",
-          "Среднее время реакции служб уже измеряется и может использоваться для SLA-контроля.",
-          "Модуль помогает не просто видеть ДТП, а быстро показать штабный приоритет.",
+          `Подключённый CV-контур показывает: ${trafficState.label.toLowerCase()} и jam score ${trafficScore}%.`,
+          totalVehicles > 0
+            ? `В последнем snapshot детектор увидел ${totalVehicles} транспортных объектов и плотность ${trafficDensity}% кадра.`
+            : "Детектор подключён, но свежий snapshot по транспорту пока не пришёл.",
+          "Этот модуль уже можно использовать как реальный сигнал по транспортной перегрузке и координации служб.",
         ],
         recommendedFocus: [
-          "Приоритизировать перекрёстки с повторяющимися инцидентами.",
-          "Сверить задержки реагирования со схемой движения и нагрузкой полос.",
-          "Отправить краткую сводку в risk queue для участков с повторными кейсами.",
+          "Подтвердить перегруженный участок и сверить его со схемой движения и фазами светофоров.",
+          "При jam score выше порога быстро передать сигнал в транспортный штаб и 112.",
+          "Сопоставить пробку с экологическим модулем, если воздух по магистрали тоже ухудшается.",
         ],
         crossModuleSignals: [
-          "Перегруженные дороги усиливают выбросы и ухудшают воздух, поэтому транспортный и экологический контуры нужно читать вместе.",
-          "Повторяемые ДТП могут быть связаны не только с трафиком, но и с качеством покрытия и освещения.",
+          "Плотный поток увеличивает выхлопы у дороги, поэтому пробки и качество воздуха должны читаться вместе.",
+          "Транспортный сигнал можно переводить в risk queue как межмодульный кейс, если он повторяется или влияет на здоровье жителей.",
         ],
       };
     case "air-quality":
+      const aqiValue = Math.round(airSnapshot?.aqiAvg ?? 0);
+      const pm25Value = airSnapshot?.pm25Avg ?? 0;
+      const pm10Value = airSnapshot?.pm10Avg ?? 0;
+      const stationsTotal = airSnapshot?.stationsTotal ?? 0;
+      const pm25Multiple = pm25Value > 0 ? (pm25Value / WHO_PM25_GUIDELINE).toFixed(1) : "0.0";
       return {
         featureId,
         featureLabel: feature.label,
         overview: feature.overview,
-        defaultSeverity: "Высокая",
-        severityReasonHint:
-          "AQI уже вышел в нездоровый диапазон для уязвимых групп и требует управленческой реакции.",
+        defaultSeverity: healthInsight.severity,
+        severityReasonHint: healthInsight.summary,
         metrics: [
           {
             label: "AQI Алматы",
-            value: "112",
-            detail: "Городской индекс качества воздуха в текущем срезе.",
+            value: String(aqiValue),
+            detail: "Текущий городской AQI из AIR API по Алматы.",
           },
           {
             label: "PM2.5",
-            value: "80",
-            detail: "Повышенная концентрация мелких частиц в приоритетной зоне.",
+            value: pm25Value > 0 ? `${pm25Value.toFixed(1)} µg/m³` : "нет данных",
+            detail: "Средняя концентрация мелких частиц по городу.",
           },
           {
-            label: "Тренд",
-            value: "растёт",
-            detail: "Ситуация ухудшается, а не стабилизируется.",
+            label: "PM10",
+            value: pm10Value > 0 ? `${pm10Value.toFixed(1)} µg/m³` : "нет данных",
+            detail: "Средняя концентрация PM10 по городу.",
           },
           {
-            label: "Районов под риском",
-            value: "3",
-            detail: "Алатауский, Турксибский и Ауэзовский в фокусе.",
+            label: "Станций",
+            value: String(stationsTotal),
+            detail: "Сколько станций вошло в текущую городскую сводку.",
           },
         ],
         findings: [
-          "Качество воздуха в Алматы ухудшается, а индекс AQI вышел выше комфортного диапазона.",
-          "Наиболее напряжённые районы требуют не только мониторинга, но и немедленных мер для города.",
-          "Контур полезен тем, что сразу связывает показатель с управленческими действиями.",
+          `AIR API по Алматы сейчас показывает AQI ${aqiValue}: ${airState.label.toLowerCase()}.`,
+          pm25Value > 0
+            ? `PM2.5 сейчас ${pm25Value.toFixed(1)} µg/m³, это примерно ${pm25Multiple}× от ориентира ВОЗ 15 µg/m³.`
+            : "Свежего значения PM2.5 сейчас нет, но модуль продолжает опрашивать live-источник.",
+          healthInsight.summary,
         ],
-        recommendedFocus: [
-          "Ограничить транспортный поток на перегруженных участках в часы пика.",
-          "Предупредить жителей и усилить полевой мониторинг по приоритетным районам.",
-          "Сверить вклад ТЭЦ, трафика и локальных источников для адресной реакции.",
-        ],
+        recommendedFocus: healthInsight.actions,
         crossModuleSignals: [
-          "Высокая дорожная нагрузка и дефекты покрытия могут одновременно усиливать пробку и загрязнение воздуха.",
-          "Экологическая сводка должна входить в общую risk queue, а не жить отдельно от транспортного контура.",
+          trafficSnapshot
+            ? `Транспортный модуль сейчас даёт ${trafficState.label.toLowerCase()} и jam score ${Math.round(trafficSnapshot.jam.score)}%, что усиливает уличный выхлоп на магистралях.`
+            : "Экологическая сводка становится полезнее, когда читается вместе с транспортной нагрузкой по магистралям.",
+          "Воздух не должен жить отдельно: его нужно связывать с пробками, risk queue и городскими предупреждениями.",
         ],
       };
     case "risk-workflow":
@@ -482,6 +669,8 @@ export default function Page() {
   const [aiSummary, setAiSummary] = useState<AiAssistantSummary | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [airSnapshot, setAirSnapshot] = useState<AlmatyAirSnapshot | null>(null);
+  const [trafficSnapshot, setTrafficSnapshot] = useState<TrafficJamSnapshot | null>(null);
 
   const [dashboardState, setDashboardState] = useState<DashboardHydrationState>(
     createUnavailableDashboardState(),
@@ -500,12 +689,65 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const refreshAir = async () => {
+      const snapshot = await loadAlmatyAirSnapshot();
+      if (!cancelled && snapshot) {
+        setAirSnapshot(snapshot);
+      }
+    };
+
+    void refreshAir();
+    const intervalId = window.setInterval(() => {
+      void refreshAir();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshTraffic = async () => {
+      const snapshot = await loadTrafficJamSnapshot();
+      if (!cancelled && snapshot) {
+        setTrafficSnapshot(snapshot);
+      }
+    };
+
+    void refreshTraffic();
+    const intervalId = window.setInterval(() => {
+      void refreshTraffic();
+    }, 30 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
   const anomalies = dashboardState.anomalies;
   const activeF = FEATURES.find((f) => f.id === activeFeature)!;
-  const activeModuleContext = buildAiModuleContext(activeFeature, dashboardState);
+  const activeModuleContext = buildAiModuleContext(
+    activeFeature,
+    dashboardState,
+    airSnapshot,
+    trafficSnapshot,
+  );
+  const liveContextVersion =
+    activeFeature === "air-quality"
+      ? airSnapshot?.timestamp ?? "air-none"
+      : activeFeature === "cv-accidents"
+        ? trafficSnapshot?.updatedAt ?? "traffic-none"
+        : "static";
   const visibleSummary =
     aiSummary ?? {
       whatIsHappening: activeModuleContext.findings.slice(0, 2).join(" "),
@@ -577,10 +819,10 @@ export default function Page() {
     }
 
     void requestAiAssistant({
-      module: buildAiModuleContext(activeFeature, dashboardState),
+      module: buildAiModuleContext(activeFeature, dashboardState, airSnapshot, trafficSnapshot),
       mode: "summary",
     });
-  }, [activeFeature, dashLoaded, dashboardState]);
+  }, [activeFeature, dashLoaded, dashboardState, liveContextVersion]);
 
   const sendChat = async () => {
     const text = chatInput.trim();
@@ -710,8 +952,10 @@ export default function Page() {
           </div>
 
           {activeFeature === "ch4-map" && <Ch4Panel anomalies={anomalies} />}
-          {activeFeature === "cv-accidents" && <CvAccidentsPanel />}
-          {activeFeature === "air-quality" && <AirQualityPanel />}
+          {activeFeature === "cv-accidents" && <CvAccidentsPanel trafficSnapshot={trafficSnapshot} />}
+          {activeFeature === "air-quality" && (
+            <AirQualityPanel airSnapshot={airSnapshot} trafficSnapshot={trafficSnapshot} />
+          )}
           {activeFeature === "risk-workflow" && <RiskWorkflowPanel />}
           {activeFeature === "forecast-center" && <ForecastCenterPanel />}
           {activeFeature === "report-studio" && <ReportStudioPanel />}
@@ -719,12 +963,10 @@ export default function Page() {
 
         <section className="scm-faq-shell">
           <div className="scm-faq-header">
-            <span className="scm-faq-kicker">
-              ЧАВО
+            <div className="scm-title-row">
+              <h2>Часто задаваемые вопросы</h2>
               <HelpHint text="Эта секция отвечает коротко и по делу: что за платформа, чем полезна городу и как читать экран без лишнего текста." />
-            </span>
-            <h2>Что важно понять за 30 секунд</h2>
-            <p>Короткие ответы для жюри, акимата и будущего пользователя платформы.</p>
+            </div>
           </div>
 
           <div className="scm-faq-layout">
@@ -831,7 +1073,7 @@ export default function Page() {
               onClick={() => {
                 if (chip.featureId === activeFeature) {
                   void requestAiAssistant({
-                    module: buildAiModuleContext(chip.featureId, dashboardState),
+                    module: buildAiModuleContext(chip.featureId, dashboardState, airSnapshot, trafficSnapshot),
                     mode: "summary",
                   });
                   return;
@@ -1049,38 +1291,49 @@ function Ch4Panel({ anomalies }: { anomalies: any[] }) {
 }
 
 // ─── CV Accidents Panel ──────────────────────────────────────────────────────────
-function CvAccidentsPanel() {
-  const incidents = [
-    { id: 1, loc: "Аль-Фараби / Навои", type: "Столкновение", time: "14:32", sev: "high" },
-    { id: 2, loc: "Достык / Сатпаева", type: "Нарушение ПДД", time: "13:51", sev: "medium" },
-    { id: 3, loc: "Рыскулова / Байтурсынова", type: "Пробка 8 км", time: "12:20", sev: "medium" },
-  ];
+function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnapshot | null }) {
+  const trafficState = getTrafficState(trafficSnapshot?.jam.score ?? 0);
+  const updatedAt = formatAlmatyTime(trafficSnapshot?.updatedAt);
+  const totalCount = trafficSnapshot?.totalCount ?? 0;
+  const densityPct = Math.round((trafficSnapshot?.density ?? 0) * 100);
+  const jamScore = Math.round(trafficSnapshot?.jam.score ?? 0);
+  const counts = trafficSnapshot?.counts ?? { car: 0, motorcycle: 0, bus: 0, truck: 0 };
+  const detections = trafficSnapshot?.detections.slice(0, 6) ?? [];
+  const frameWidth = Math.max(1440, ...detections.map((item) => item.bbox[2]));
+  const frameHeight = Math.max(1080, ...detections.map((item) => item.bbox[3]));
 
   const stats = [
     {
-      label: "Камер активно",
-      value: "342",
+      label: "Машин в кадре",
+      value: String(totalCount),
       color: "#ff9f3d",
-      help: "Сколько городских камер сейчас участвуют в computer vision контуре.",
+      help: "Сколько транспортных объектов сейчас определил подключённый trafficjams detector.",
     },
     {
-      label: "Инцидентов / 24ч",
-      value: "8",
-      color: "#ff5c4d",
-      help: "Сколько дорожных событий попало в очередь за последние сутки.",
+      label: "Jam score",
+      value: `${jamScore}%`,
+      color: trafficState.color,
+      help: "Суммарная оценка дорожной перегрузки из trafficjams.",
     },
     {
-      label: "Ср. время реакции",
-      value: "6.2 мин",
+      label: "Плотность",
+      value: `${densityPct}%`,
       color: "#47a6ff",
-      help: "Среднее время между детекцией события и реакцией службы.",
+      help: "Какая доля текущего кадра занята транспортом.",
     },
     {
-      label: "Нарушений ПДД",
-      value: "124",
+      label: "Обновлено",
+      value: updatedAt,
       color: "#a78bfa",
-      help: "Количество зафиксированных нарушений, которые система классифицировала автоматически.",
+      help: "Время последнего сохранённого snapshot из CV-контура.",
     },
+  ];
+
+  const trafficRows = [
+    { label: "Автомобили", value: counts.car, detail: "Легковой поток" },
+    { label: "Мотоциклы", value: counts.motorcycle, detail: "Двухколёсный транспорт" },
+    { label: "Автобусы", value: counts.bus, detail: "Общественный транспорт" },
+    { label: "Грузовики", value: counts.truck, detail: "Грузовой поток" },
   ];
 
   return (
@@ -1099,111 +1352,266 @@ function CvAccidentsPanel() {
 
       <div className="scm-section-stack">
         <SectionHeading
-          title="Видеопоток"
-          help="Демонстрационная сцена computer vision: на ней система выделяет камеры и потенциальные ДТП или нарушения."
+          title="Текущий кадр детектора"
+          help="Эта сцена строится по реальному snapshot из trafficjams: boxes, confidence и плотность потока."
         />
         <div className="scm-cv-visual">
           <div className="scm-cv-screen">
             <div className="scm-cv-overlay">
-              {[
-                { top: "28%", left: "22%", label: "Cam 14" },
-                { top: "52%", left: "58%", label: "Cam 07" },
-                { top: "68%", left: "35%", label: "Cam 22" },
-              ].map((cam) => (
-                <div key={cam.label} className="scm-cv-box" style={{ top: cam.top, left: cam.left }}>
-                  <span>{cam.label}</span>
-                </div>
-              ))}
+              {detections.map((detection, index) => {
+                const [x1, y1, x2, y2] = detection.bbox;
+                return (
+                  <div
+                    key={`${detection.className}-${index}`}
+                    className="scm-cv-box"
+                    style={{
+                      left: `${(x1 / frameWidth) * 100}%`,
+                      top: `${(y1 / frameHeight) * 100}%`,
+                      width: `${Math.max(((x2 - x1) / frameWidth) * 100, 8)}%`,
+                      height: `${Math.max(((y2 - y1) / frameHeight) * 100, 8)}%`,
+                    }}
+                  >
+                    <span>{`${getTrafficClassShortLabel(detection.className)} ${Math.round(detection.confidence * 100)}%`}</span>
+                  </div>
+                );
+              })}
             </div>
-            <p className="scm-cv-label">Анализ видеопотока в реальном времени · YOLOv8</p>
+            <p className="scm-cv-label">
+              {trafficSnapshot
+                ? `Источник: trafficjams · ${trafficState.label} · обновлено ${updatedAt}`
+                : "Источник trafficjams пока не отдал актуальный snapshot."}
+            </p>
           </div>
         </div>
       </div>
 
       <div className="scm-section-stack">
         <SectionHeading
-          title="Лента событий"
-          help="Живая очередь detected incidents: где произошло событие, какого оно типа и когда было замечено."
+          title="Состав потока"
+          help="Разбивка по классам транспорта из текущего snapshot. Это реальный output CV-модуля, а не mock-лента."
         />
         <div className="scm-incident-list">
-          {incidents.map((inc) => (
-            <div key={inc.id} className={`scm-incident-row scm-incident-${inc.sev}`}>
+          {trafficRows.map((row) => (
+            <div key={row.label} className="scm-incident-row">
               <div className="scm-incident-dot" />
               <div className="scm-incident-info">
-                <strong>{inc.loc}</strong>
-                <span>{inc.type}</span>
+                <strong>{row.label}</strong>
+                <span>{row.detail}</span>
               </div>
-              <span className="scm-incident-time">{inc.time}</span>
+              <span className="scm-incident-time">{row.value}</span>
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="scm-info-grid">
+        <InfoCard
+          title="Статус потока"
+          desc={`${trafficState.label}. Jam score сейчас ${jamScore}%, поэтому модуль уже можно использовать как входной транспортный сигнал.`}
+          icon="◎"
+          color={trafficState.color}
+          help="Текущее состояние потока по CV-модулю."
+        />
+        <InfoCard
+          title="Связь с воздухом"
+          desc="Если рядом одновременно высокий AQI, плотный поток усиливает выхлопы у магистрали и health-риск для чувствительных групп."
+          icon="↗"
+          color="#57d18e"
+          help="Почему транспортный модуль важно читать вместе с качеством воздуха."
+        />
+        <InfoCard
+          title="Источник"
+          desc="Данные читаются из trafficjams/traffic_data.json, который формирует YOLOv8 detector."
+          icon="▣"
+          color="#47a6ff"
+          help="Подключённый технический источник для этого модуля."
+        />
       </div>
     </div>
   );
 }
 
 // ─── Air Quality Panel ───────────────────────────────────────────────────────────
-function AirQualityPanel() {
-  const districts = [
-    { name: "Алатауский", aqi: 142, level: "Нездоровый", color: "#ff5c4d" },
-    { name: "Бостандык", aqi: 87, level: "Умеренный", color: "#ff9f3d" },
-    { name: "Медеуский", aqi: 55, level: "Приемлемый", color: "#4ade80" },
-    { name: "Турксибский", aqi: 118, level: "Нездоровый", color: "#ff5c4d" },
-    { name: "Ауэзовский", aqi: 96, level: "Умеренный", color: "#ff9f3d" },
-    { name: "Наурызбайский", aqi: 71, level: "Умеренный", color: "#ff9f3d" },
+function AirQualityPanel({
+  airSnapshot,
+  trafficSnapshot,
+}: {
+  airSnapshot: AlmatyAirSnapshot | null;
+  trafficSnapshot: TrafficJamSnapshot | null;
+}) {
+  const aqiValue = Math.round(airSnapshot?.aqiAvg ?? 0);
+  const pm25Value = airSnapshot?.pm25Avg ?? 0;
+  const pm10Value = airSnapshot?.pm10Avg ?? 0;
+  const stationsTotal = airSnapshot?.stationsTotal ?? 0;
+  const airState = getAqiState(aqiValue);
+  const trafficState = getTrafficState(trafficSnapshot?.jam.score ?? 0);
+  const healthInsight = buildHealthInsight(airSnapshot, trafficSnapshot);
+  const updatedAt = formatAlmatyTime(airSnapshot?.timestamp || airSnapshot?.refreshedAt);
+  const pm25Multiple = pm25Value > 0 ? (pm25Value / WHO_PM25_GUIDELINE).toFixed(1) : "0.0";
+
+  const stats = [
+    {
+      label: "AQI Алматы",
+      value: String(aqiValue),
+      color: airState.color,
+      help: "Текущий городской AQI из подключённого AIR API.",
+    },
+    {
+      label: "PM2.5",
+      value: pm25Value > 0 ? `${pm25Value.toFixed(1)} µg/m³` : "нет данных",
+      color: "#ff9f3d",
+      help: "Средняя концентрация мелких частиц по Алматы.",
+    },
+    {
+      label: "PM10",
+      value: pm10Value > 0 ? `${pm10Value.toFixed(1)} µg/m³` : "нет данных",
+      color: "#47a6ff",
+      help: "Средняя концентрация PM10 по Алматы.",
+    },
+    {
+      label: "Станций",
+      value: String(stationsTotal),
+      color: "#a78bfa",
+      help: "Сколько станций вошло в текущую сводку AIR API.",
+    },
   ];
 
   const recommendations = [
-    "Временные ограничения движения на Рыскулова (08:00–10:00)",
-    "Увеличить частоту поливочных машин в Алатауском районе",
-    "Предупреждение для жителей: использовать маски на улице",
-    "Проверить выбросы ТЭЦ-2 сверх нормативов",
-  ];
+    ...healthInsight.actions,
+    pm25Value > WHO_PM25_GUIDELINE
+      ? `PM2.5 сейчас выше ориентира ВОЗ примерно в ${pm25Multiple}×, поэтому уличный мониторинг надо усилить.`
+      : "Порог по PM2.5 пока не выглядит критическим, но ситуацию стоит продолжать наблюдать.",
+  ].slice(0, 4);
 
   return (
     <div className="scm-panel-body">
+      <div className="scm-kpi-row">
+        {stats.map((stat) => (
+          <div className="scm-kpi-card" key={stat.label} style={{ "--kpi-color": stat.color } as CSSProperties}>
+            <div className="scm-kpi-head">
+              <span>{stat.label}</span>
+              <HelpHint text={stat.help} />
+            </div>
+            <strong>{stat.value}</strong>
+          </div>
+        ))}
+      </div>
+
       <div className="scm-section-stack">
         <SectionHeading
-          title="Индекс по районам"
-          help="Сводка по качеству воздуха в Алматы: общий AQI города и состояние по районам."
+          title="Городская сводка AQI"
+          help="Здесь больше нет fake-районов: секция показывает реальный city average из AIR API по Алматы."
         />
         <div className="scm-aq-header-grid">
           <div className="scm-aq-gauge">
             <div className="scm-aq-dial">
-              <strong>112</strong>
+              <strong>{aqiValue}</strong>
               <span>AQI Алматы</span>
             </div>
-            <div className="scm-aq-status" style={{ color: "#ff9f3d" }}>Нездоровый для уязвимых</div>
+            <div className="scm-aq-status" style={{ color: airState.color }}>{airState.label}</div>
           </div>
           <div className="scm-district-grid">
-            {districts.map((d) => (
-              <div className="scm-district-card" key={d.name}>
-                <div className="scm-district-bar-wrap">
-                  <div
-                    className="scm-district-bar"
-                    style={{ width: `${Math.min(100, d.aqi / 2)}%`, background: d.color }}
-                  />
-                </div>
-                <div className="scm-district-info">
-                  <span>{d.name}</span>
-                  <strong style={{ color: d.color }}>{d.aqi}</strong>
-                </div>
+            <div className="scm-district-card">
+              <div className="scm-district-bar-wrap">
+                <div
+                  className="scm-district-bar"
+                  style={{ width: `${Math.min(100, (airSnapshot?.sources.airgradient.pm25Avg ?? 0) * 2)}%`, background: "#4ade80" }}
+                />
               </div>
-            ))}
+              <div className="scm-district-info">
+                <span>AirGradient · PM2.5</span>
+                <strong style={{ color: "#4ade80" }}>
+                  {airSnapshot?.sources.airgradient.pm25Avg?.toFixed(1) ?? "—"}
+                </strong>
+              </div>
+            </div>
+            <div className="scm-district-card">
+              <div className="scm-district-bar-wrap">
+                <div
+                  className="scm-district-bar"
+                  style={{ width: `${Math.min(100, airSnapshot?.sources.iqair.aqiAvg ?? airSnapshot?.aqiAvg ?? 0)}%`, background: "#47a6ff" }}
+                />
+              </div>
+              <div className="scm-district-info">
+                <span>IQAir · AQI</span>
+                <strong style={{ color: "#47a6ff" }}>
+                  {airSnapshot?.sources.iqair.aqiAvg?.toFixed(0) ?? aqiValue}
+                </strong>
+              </div>
+            </div>
+            <div className="scm-district-card">
+              <div className="scm-district-bar-wrap">
+                <div
+                  className="scm-district-bar"
+                  style={{ width: `${Math.min(100, Number(pm25Multiple) * 25)}%`, background: "#ff9f3d" }}
+                />
+              </div>
+              <div className="scm-district-info">
+                <span>PM2.5 к ориентиру ВОЗ</span>
+                <strong style={{ color: "#ff9f3d" }}>{pm25Multiple}×</strong>
+              </div>
+            </div>
+            <div className="scm-district-card">
+              <div className="scm-district-bar-wrap">
+                <div className="scm-district-bar" style={{ width: "100%", background: "#a78bfa" }} />
+              </div>
+              <div className="scm-district-info">
+                <span>Обновление AIR API</span>
+                <strong style={{ color: "#a78bfa" }}>{updatedAt}</strong>
+              </div>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <div className="scm-section-stack">
+        <SectionHeading
+          title="Риск для здоровья"
+          help="Этот блок связывает воздух и пробки: если AQI высокий и jam score высокий, риск для детей и пожилых растёт."
+        />
+        <div className="scm-info-grid">
+          <InfoCard
+            title={healthInsight.title}
+            desc={healthInsight.summary}
+            icon="♥"
+            color={healthInsight.color}
+            help="Короткая health-интерпретация для города на основе воздуха и дорожной нагрузки."
+          />
+          <InfoCard
+            title="Трафик у магистралей"
+            desc={
+              trafficSnapshot
+                ? `${trafficState.label}. Jam score ${Math.round(trafficSnapshot.jam.score)}% усиливает риск у дорог с плотным потоком.`
+                : "Транспортный snapshot пока не получен, поэтому health-связка строится только по воздуху."
+            }
+            icon="◎"
+            color={trafficState.color}
+            help="Связка экологического и транспортного контуров."
+          />
+          <InfoCard
+            title="Источник воздуха"
+            desc={
+              airSnapshot
+                ? `AIR API · ${stationsTotal} станций · ${airSnapshot.city}`
+                : "AIR API сейчас недоступен, поэтому live-метрики временно не показаны."
+            }
+            icon="◌"
+            color="#57d18e"
+            help="Внешний live-источник воздуха для этой секции."
+          />
         </div>
       </div>
 
       <div className="scm-reco-section">
         <div className="scm-title-row">
-          <h3 className="scm-reco-title">🏛️ Рекомендации для государства</h3>
-          <HelpHint text="Короткие действия для акимата и городских служб: что можно сделать прямо сейчас, чтобы снизить нагрузку на воздух." />
+          <h3 className="scm-reco-title">Рекомендации для города</h3>
+          <HelpHint text="Короткие управленческие действия по текущим live-метрикам воздуха и пробок." />
         </div>
         <div className="scm-reco-list">
-          {recommendations.map((r, i) => (
-            <div className="scm-reco-item" key={i}>
-              <span className="scm-reco-num">{i + 1}</span>
-              <p>{r}</p>
+          {recommendations.map((recommendation, index) => (
+            <div className="scm-reco-item" key={recommendation}>
+              <span className="scm-reco-num">{index + 1}</span>
+              <p>{recommendation}</p>
             </div>
           ))}
         </div>

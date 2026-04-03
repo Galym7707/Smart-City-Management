@@ -4,56 +4,92 @@ app_port: 7860
 fullWidth: true
 ---
 
+# Smart City Management
 
-It is a methane and flaring workflow demo for Kazakhstan oil and gas operations.
+Кратко: это hackathon MVP веб-платформы для городского штаба и акимата Алматы. Проект объединяет визуальный command center на Next.js, operational workflow для кейсов и отчётов, а также AI-сводку в правой панели.
 
-The product focus is not a map by itself. The core loop is:
+## Что показывает продукт
 
-1. Load satellite screening data
-2. Rank suspected zones
-3. Open an operational case
-4. Track verification tasks
-5. Export an MRV report
+Текущий frontend собирает 6 пользовательских модулей на одном экране:
 
-## What is in this repository
+1. `CH4 карта` — спутниковый контур аномалий и зон для проверки.
+2. `Computer Vision ДТП` — demo-панель по авариям и нагрузке на дороги.
+3. `Воздух Алматы` — AQI, качество воздуха по районам и рекомендации для города.
+4. `Очередь рисков` — signal-to-incident workflow.
+5. `Прогноз города` — forecast-окна и сценарная нагрузка.
+6. `Отчёты и качество` — контроль пакета и подготовка выходного отчёта.
 
-- `apps/web` — Next.js frontend
-- `apps/api` — FastAPI backend
-- `Dockerfile` — Hugging Face Docker Space entrypoint
+Справа работает `AI Summary rail`: краткая интерпретация ситуации, уровень срочности, связь с другими модулями и рекомендуемые действия. Для AI-панели в web-приложении есть server route под Gemini API.
 
-## Local development
+## Базовый workflow
+
+В репозитории сохранён операционный контур, который лежит в основе demo:
+
+`сигнал / anomaly -> risk queue -> incident -> tasks -> report`
+
+На backend это выражено через API для:
+
+- dashboard и activity feed
+- списка аномалий и инцидентов
+- продвижения аномалии в incident
+- создания и закрытия задач
+- генерации и экспорта отчёта в `html / pdf / docx`
+- статуса и истории pipeline sync
+
+## Стек
+
+- Frontend: `Next.js`, `React`, `TypeScript`, `MapLibre`
+- Backend: `FastAPI`, `Pydantic`, `SQLAlchemy`, `APScheduler`
+- База данных: `PostgreSQL/PostGIS` или локальный `SQLite` fallback
+- Экспорт отчётов: `python-docx`, `reportlab`
+- Container runtime: `Docker`
+
+## Структура репозитория
+
+- `apps/web` — Next.js frontend и UI command center
+- `apps/web/app/api/ai-assistant/route.ts` — server route для AI-сводки
+- `apps/api` — FastAPI backend с workflow, pipeline и export
+- `Dockerfile` — сборка frontend + backend в один контейнер на порт `7860`
+
+## Локальный запуск
 
 Frontend:
 
 ```bash
 npm install
-npm run dev --workspace=@duo/web
+npm run dev:web
 ```
 
 Backend:
 
 ```bash
-cd apps/api
-pip install -e .
+pip install -e ./apps/api
 uvicorn app.main:app --app-dir apps/api --reload
 ```
 
-## Hugging Face Space deployment
+Build frontend:
 
-This repository is configured for a Docker Space that serves:
+```bash
+npm run build:web
+```
 
-- the exported frontend from FastAPI static files
-- the backend API on the same public port
+## Docker / Hugging Face Space
 
-### Runtime expectations
+Репозиторий подготовлен под Docker-рантайм:
 
-- The container listens on port `7860`
-- If `DATABASE_URL` is not set, the app falls back to local SQLite for demo use
-- Earth Engine requires project configuration and credentials through Space secrets
+- сначала собирается static export frontend
+- затем FastAPI поднимает backend и, если экспорт frontend существует, монтирует его на `/`
+- контейнер слушает порт `7860`
 
-### Required Space secrets
+## Переменные окружения
 
-- `EARTH_ENGINE_PROJECT`
-- `EARTH_ENGINE_SERVICE_ACCOUNT_JSON`
+По коду сейчас используются или поддерживаются такие ключи:
 
-Without Earth Engine credentials, the application can still boot, but screening refresh will not succeed.
+- `DATABASE_URL` — если не задан, backend падает обратно на локальный SQLite-файл
+- `STATIC_EXPORT_DIR` — путь до экспортированного frontend для монтирования через FastAPI
+- `GEMINI_API_KEY` — ключ для AI summary route
+- `GEMINI_MODEL` — модель Gemini, по умолчанию route использует `gemini-2.5-flash`
+
+## Статус проекта
+
+Это demo-oriented MVP для хакатона: упор сделан на понятный экран, operational workflow и экспортируемый результат, а не на тяжёлую enterprise-интеграцию.
