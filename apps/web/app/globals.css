@@ -4370,6 +4370,10 @@ body {
   font-weight: 700;
 }
 
+.scm-chat-trigger-mini {
+  display: none;
+}
+
 .scm-chat-trigger-active {
   border-color: color-mix(in srgb, var(--feature-color) 54%, transparent);
   background: color-mix(in srgb, var(--feature-color) 14%, transparent);
@@ -4881,10 +4885,16 @@ body {
 .scm-district-grid,
 .scm-flood-zone-header,
 .scm-energy-header,
-.scm-chatbot-header,
 .scm-chatbot-input-row,
 .scm-faq-layout {
   display: grid;
+  gap: 14px;
+}
+
+.scm-chatbot-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 14px;
 }
 
@@ -4960,16 +4970,6 @@ body {
   padding: 20px 18px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(11, 19, 31, 0.96), rgba(7, 14, 24, 0.92));
-}
-
-.scm-chatbot-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--feature-color) 16%, transparent);
 }
 
 .scm-chatbot-close,
@@ -5081,6 +5081,10 @@ body {
   height: 58px;
   z-index: 30;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 @keyframes scmPing {
@@ -5133,8 +5137,12 @@ body {
   .scm-sidebar-brand span,
   .scm-nav-label,
   .scm-nav-badge,
-  .scm-chat-trigger span:last-child {
+  .scm-chat-trigger-full {
     display: none;
+  }
+
+  .scm-chat-trigger-mini {
+    display: inline;
   }
 
   .scm-nav-item {
@@ -5339,6 +5347,7 @@ body {
 .scm-kpi-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -5392,7 +5401,6 @@ body {
 }
 
 .scm-help {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5408,50 +5416,17 @@ body {
   color: rgba(245, 248, 252, 0.92);
   font-size: 0.76rem;
   font-weight: 800;
+  font-family: inherit;
   line-height: 1;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
   cursor: help;
   transition:
     transform 180ms ease,
     background 180ms ease,
     border-color 180ms ease,
     box-shadow 180ms ease;
-}
-
-.scm-help::before,
-.scm-help::after {
-  position: absolute;
-  left: 50%;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease, transform 180ms ease;
-  z-index: 40;
-}
-
-.scm-help::before {
-  bottom: calc(100% + 4px);
-  transform: translate(-50%, 8px);
-  border-width: 7px 7px 0;
-  border-style: solid;
-  border-color: rgba(10, 18, 30, 0.96) transparent transparent;
-  content: "";
-}
-
-.scm-help::after {
-  bottom: calc(100% + 12px);
-  width: min(280px, calc(100vw - 32px));
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background:
-    linear-gradient(180deg, rgba(17, 28, 45, 0.98), rgba(8, 13, 23, 0.98));
-  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.34);
-  color: rgba(242, 247, 252, 0.96);
-  content: attr(data-help);
-  font-size: 0.82rem;
-  font-weight: 500;
-  line-height: 1.5;
-  text-align: left;
-  transform: translate(-50%, 10px);
 }
 
 .scm-help:hover,
@@ -5465,21 +5440,46 @@ body {
   transform: translateY(-1px);
 }
 
-.scm-help:hover::before,
-.scm-help:hover::after,
-.scm-help:focus-visible::before,
-.scm-help:focus-visible::after {
-  opacity: 1;
+.scm-help-popover {
+  position: fixed;
+  z-index: 120;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(17, 28, 45, 0.98), rgba(8, 13, 23, 0.98));
+  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.34);
+  color: rgba(242, 247, 252, 0.96);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  pointer-events: none;
 }
 
-.scm-help:hover::before,
-.scm-help:focus-visible::before {
-  transform: translate(-50%, 0);
+.scm-help-popover::before {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 18, 30, 0.98);
+  content: "";
+  transform: translateX(-50%) rotate(45deg);
 }
 
-.scm-help:hover::after,
-.scm-help:focus-visible::after {
-  transform: translate(-50%, 0);
+.scm-help-popover-top {
+  transform: translateY(-100%);
+}
+
+.scm-help-popover-top::before {
+  bottom: -8px;
+}
+
+.scm-help-popover-bottom::before {
+  top: -8px;
+  transform: translateX(-50%) rotate(225deg);
 }
 
 .scm-globe-core strong {
@@ -5547,21 +5547,103 @@ body {
   opacity: 1;
 }
 
+.scm-shell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 360px;
+  bottom: 0;
+  left: 248px;
+  background:
+    linear-gradient(180deg, rgba(16, 28, 44, 0.48), rgba(8, 15, 25, 0.42)),
+    url("/images/almaty-skyline.jpg") center 44% / cover no-repeat;
+  opacity: 0.24;
+  filter: saturate(1.08) contrast(1.06) brightness(1.08);
+  mix-blend-mode: screen;
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.94) 12%, rgba(0, 0, 0, 0.94) 88%, transparent 100%);
+  pointer-events: none;
+}
+
+.scm-hero::after,
+.scm-feature-panel::before,
+.scm-faq-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.scm-hero::after {
+  background:
+    linear-gradient(90deg, rgba(6, 12, 20, 0.96) 0%, rgba(6, 12, 20, 0.72) 28%, rgba(6, 12, 20, 0.16) 58%, rgba(6, 12, 20, 0.54) 100%),
+    linear-gradient(180deg, rgba(122, 171, 255, 0.1), rgba(6, 12, 20, 0.42)),
+    url("/images/almaty-skyline.jpg") 63% 44% / cover no-repeat;
+  opacity: 0.68;
+  filter: saturate(1.08) contrast(1.08) brightness(0.96);
+}
+
+.scm-feature-panel::before {
+  background:
+    linear-gradient(90deg, rgba(7, 14, 24, 0.92) 0%, rgba(7, 14, 24, 0.58) 50%, rgba(7, 14, 24, 0.88) 100%),
+    url("/images/almaty-skyline.jpg") center 52% / cover no-repeat;
+  opacity: 0.28;
+  filter: saturate(1.04) brightness(0.94);
+  mask-image: radial-gradient(circle at 86% 18%, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.82) 20%, transparent 58%);
+}
+
+.scm-faq-shell::before {
+  background:
+    linear-gradient(180deg, rgba(7, 14, 24, 0.82) 0%, rgba(7, 14, 24, 0.64) 100%),
+    url("/images/almaty-skyline.jpg") center 36% / cover no-repeat;
+  opacity: 0.24;
+  filter: saturate(1.02) brightness(0.92);
+  mask-image:
+    linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.86) 18%, rgba(0, 0, 0, 0.86) 82%, transparent 100%),
+    radial-gradient(circle at 18% 82%, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.74) 22%, transparent 58%);
+}
+
+.scm-feature-header,
+.scm-panel-body,
+.scm-faq-header,
+.scm-faq-layout {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 1440px) {
+  .scm-shell::after {
+    right: 0;
+    left: 224px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .scm-shell::after {
+    left: 92px;
+    opacity: 0.2;
+  }
+
+  .scm-hero::after {
+    background-position: 58% 42%;
+    opacity: 0.58;
+  }
+}
+
 @media (max-width: 720px) {
-  .scm-help::after {
+  .scm-shell::after {
     left: 0;
-    transform: translate(0, 10px);
+    opacity: 0.16;
   }
 
-  .scm-help:hover::after,
-  .scm-help:focus-visible::after {
-    transform: translate(0, 0);
+  .scm-hero::after {
+    background:
+      linear-gradient(180deg, rgba(6, 12, 20, 0.42) 0%, rgba(6, 12, 20, 0.82) 82%),
+      url("/images/almaty-skyline.jpg") 58% 36% / cover no-repeat;
+    opacity: 0.5;
   }
 
-  .scm-help::before,
-  .scm-help:hover::before,
-  .scm-help:focus-visible::before {
-    left: 12px;
-    transform: translate(0, 0);
+  .scm-feature-panel::before,
+  .scm-faq-shell::before {
+    opacity: 0.18;
   }
 }

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { AnomalyMap } from "../components/anomaly-map";
 import {
   createUnavailableDashboardState,
@@ -246,8 +247,8 @@ export default function Page() {
             onClick={() => setChatOpen((v) => !v)}
             type="button"
           >
-            <span>🤖</span>
-            <span>AI Ассистент</span>
+            <span className="scm-chat-trigger-full">AI Ассистент</span>
+            <span className="scm-chat-trigger-mini">AI</span>
           </button>
         </div>
       </aside>
@@ -367,7 +368,6 @@ export default function Page() {
       {/* ── RIGHT CHATBOT ─────────────────────────────────────── */}
       <aside className={`scm-chatbot ${chatOpen ? "scm-chatbot-open" : ""}`}>
         <div className="scm-chatbot-header">
-          <div className="scm-chatbot-avatar">🤖</div>
           <div>
             <strong>
               AI Ассистент
@@ -437,7 +437,7 @@ export default function Page() {
           type="button"
           aria-label="Открыть AI ассистент"
         >
-          🤖
+          AI
         </button>
       )}
     </div>
@@ -955,16 +955,95 @@ function ReportStudioPanel() {
 
 // ─── Shared components ───────────────────────────────────────────────────────────
 function HelpHint({ text }: { text: string }) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [popover, setPopover] = useState({
+    left: 12,
+    top: 12,
+    width: 280,
+    placement: "top" as "top" | "bottom",
+  });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current || typeof window === "undefined") {
+      return;
+    }
+
+    const updatePosition = () => {
+      if (!buttonRef.current) {
+        return;
+      }
+
+      const rect = buttonRef.current.getBoundingClientRect();
+      const width = Math.min(320, Math.max(220, window.innerWidth - 24));
+      const left = Math.min(
+        Math.max(rect.left + rect.width / 2 - width / 2, 12),
+        window.innerWidth - width - 12,
+      );
+      const placeBelow = rect.top < 156;
+
+      setPopover({
+        left,
+        top: placeBelow ? rect.bottom + 12 : rect.top - 12,
+        width,
+        placement: placeBelow ? "bottom" : "top",
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen]);
+
   return (
-    <span
-      aria-label={text}
-      className="scm-help"
-      data-help={text}
-      role="note"
-      tabIndex={0}
-    >
-      ?
-    </span>
+    <>
+      <button
+        aria-expanded={isOpen}
+        aria-label={text}
+        className="scm-help"
+        onBlur={() => setIsOpen(false)}
+        onClick={() => setIsOpen((current) => !current)}
+        onFocus={() => setIsOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setIsOpen(false);
+            buttonRef.current?.blur();
+          }
+        }}
+        onMouseEnter={() => setIsOpen(true)}
+        onMouseLeave={() => setIsOpen(false)}
+        ref={buttonRef}
+        type="button"
+      >
+        ?
+      </button>
+      {mounted && isOpen
+        ? createPortal(
+            <span
+              className={`scm-help-popover scm-help-popover-${popover.placement}`}
+              role="tooltip"
+              style={{
+                left: `${popover.left}px`,
+                top: `${popover.top}px`,
+                width: `${popover.width}px`,
+              }}
+            >
+              {text}
+            </span>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
