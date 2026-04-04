@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PotholesKZ — Мониторинг дорожных ям г. Алматы</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #111827;
+            --bg-card: #1a2236;
+            --bg-card-hover: #1f2a42;
+            --border: #2a3550;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
+            --accent-orange: #f97316;
+            --accent-red: #ef4444;
+            --accent-purple: #8b5cf6;
+            --glow-blue: rgba(59, 130, 246, 0.3);
+            --glow-red: rgba(239, 68, 68, 0.3);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, #0f172a 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(20px);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 800;
+            color: white;
+            box-shadow: 0 4px 15px var(--glow-blue);
+        }
+
+        .header-title h1 {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-title p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .live-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-green);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-date {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        /* Main Layout */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 0;
+            height: calc(100vh - 74px);
+        }
+
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 24px;
+            gap: 20px;
+        }
+
+        .right-panel {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .kpi-card:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--accent-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .kpi-card .label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .kpi-card .value {
+            font-size: 36px;
+            font-weight: 800;
+            margin-top: 8px;
+            line-height: 1;
+        }
+
+        .kpi-card .subtext {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        .kpi-card .trend {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+
+        .trend-up { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+        .trend-down { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+
+        .kpi-icon {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        /* Section title */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+        }
+
+        .tooltip-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: help;
+        }
+
+        /* Map */
+        .map-container {
+            flex: 1;
+            min-height: 400px;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
+        }
+
+        .map-overlay-info {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 999;
+            background: rgba(17, 24, 39, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            max-width: 260px;
+        }
+
+        .map-legend {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            z-index: 999;
+            background: rgba(17, 24, 39, 0.92);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 16px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .legend-item:last-child { margin-bottom: 0; }
+
+        .legend-circle {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        /* Right Panel: Dispatch */
+        .panel-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .panel-card-title {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Recommendation Card */
+        .recommendation {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(249, 115, 22, 0.05));
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .recommendation.warning {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(249, 115, 22, 0.05));
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .recommendation.ok {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.05));
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .rec-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .rec-body {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .rec-body strong {
+            color: var(--text-primary);
+        }
+
+        /* Pothole List */
+        .pothole-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .pothole-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .pothole-item:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--accent-blue);
+            transform: translateX(4px);
+        }
+
+        .pothole-thumb {
+            width: 52px;
+            height: 52px;
+            border-radius: 10px;
+            object-fit: cover;
+            border: 2px solid var(--border);
+        }
+
+        .pothole-info {
+            flex: 1;
+        }
+
+        .pothole-info .name {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .pothole-info .address {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .severity-badge {
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .severity-critical {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .severity-high {
+            background: rgba(249, 115, 22, 0.2);
+            color: #fb923c;
+            border: 1px solid rgba(249, 115, 22, 0.3);
+        }
+
+        .severity-medium {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .severity-low {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        /* Charts */
+        .chart-container {
+            height: 180px;
+            position: relative;
+        }
+
+        /* District breakdown */
+        .district-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(42, 53, 80, 0.5);
+            font-size: 13px;
+        }
+
+        .district-row:last-child { border-bottom: none; }
+
+        .district-bar-wrapper {
+            flex: 1;
+            margin: 0 12px;
+            height: 6px;
+            background: rgba(42, 53, 80, 0.8);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .district-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 1s ease;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            max-width: 750px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 16px; right: 16px;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: var(--accent-red);
+        }
+
+        .modal-image {
+            width: 100%;
+            max-height: 400px;
+            object-fit: cover;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .modal-body h2 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+
+        .modal-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .meta-item {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 12px;
+        }
+
+        .meta-item .meta-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .meta-item .meta-value {
+            font-size: 15px;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .dispatch-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.5px;
+        }
+
+        .dispatch-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--glow-blue);
+        }
+
+        /* Crew Status */
+        .crew-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(42, 53, 80, 0.5);
+        }
+
+        .crew-item:last-child { border-bottom: none; }
+
+        .crew-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .crew-info { flex: 1; }
+        .crew-info .crew-name { font-size: 13px; font-weight: 600; }
+        .crew-info .crew-role { font-size: 11px; color: var(--text-muted); }
+
+        .crew-status {
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-available {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-green);
+        }
+
+        .status-busy {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-yellow);
+        }
+
+        .status-offline {
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--text-muted);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Leaflet popup customization */
+        .leaflet-popup-content-wrapper {
+            background: var(--bg-card) !important;
+            color: var(--text-primary) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 12px !important;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5) !important;
+        }
+
+        .leaflet-popup-tip {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border) !important;
+        }
+
+        .leaflet-popup-content {
+            margin: 12px 16px !important;
+            font-family: 'Inter', sans-serif !important;
+        }
+
+        .popup-content { min-width: 200px; }
+        .popup-content h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+        .popup-content p { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .popup-content .popup-btn {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            padding: 8px;
+            background: var(--accent-blue);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+        }
+        .popup-content .popup-btn:hover { background: #2563eb; }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .main-container { grid-template-columns: 1fr; }
+            .right-panel { border-left: none; border-top: 1px solid var(--border); }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        /* Priority score */
+        .priority-score {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .priority-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .priority-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1s ease;
+        }
+
+        /* Freeze-thaw indicator */
+        .weather-alert {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.05));
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .weather-alert .icon { font-size: 20px; }
+        .weather-alert .text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+        .weather-alert .text strong { color: var(--accent-purple); }
+
+        /* Filter tabs */
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .filter-tab {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-tab.active, .filter-tab:hover {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+        }
+
+        /* Animate numbers */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-in {
+            animation: fadeInUp 0.5s ease forwards;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+    <div class="header-left">
+        <div class="logo">KZ</div>
+        <div class="header-title">
+            <h1>PotholesKZ</h1>
+            <p>Спутниковый мониторинг дорожных ям и рекомендации для ремонтных бригад</p>
+        </div>
+        <div class="live-badge">
+            <span class="live-dot"></span>
+            LIVE
+        </div>
+    </div>
+    <div class="header-right">
+        <div class="header-date" id="currentDate"></div>
+    </div>
+</header>
+
+<!-- Main Content -->
+<div class="main-container">
+    <!-- Left Panel -->
+    <div class="left-panel">
+        <!-- KPI Cards -->
+        <div class="kpi-grid">
+            <div class="kpi-card animate-in" style="animation-delay: 0.1s">
+                <div class="label">Зон мониторинга <span class="tooltip-icon" title="Количество активных зон наблюдения">?</span></div>
+                <div class="value" style="color: var(--accent-blue)">6</div>
+                <div class="subtext">районов г. Алматы</div>
+                <div class="kpi-icon" style="background: rgba(59, 130, 246, 0.15)">📍</div>
+            </div>
+            <div class="kpi-card animate-in" style="animation-delay: 0.2s">
+                <div class="label">Обнаружено ям <span class="tooltip-icon" title="Общее число зафиксированных ям">?</span></div>
+                <div class="value" style="color: var(--accent-red)">6</div>
+                <div class="trend trend-up">▲ +2 за неделю</div>
+                <div class="kpi-icon" style="background: rgba(239, 68, 68, 0.15)">🕳️</div>
+            </div>
+            <div class="kpi-card animate-in" style="animation-delay: 0.3s">
+                <div class="label">Критических <span class="tooltip-icon" title="Ямы требующие немедленного ремонта">?</span></div>
+                <div class="value" style="color: var(--accent-orange)">3</div>
+                <div class="subtext">требуют срочного выезда</div>
+                <div class="kpi-icon" style="background: rgba(249, 115, 22, 0.15)">⚠️</div>
+            </div>
+            <div class="kpi-card animate-in" style="animation-delay: 0.4s">
+                <div class="label">Последнее обновление <span class="tooltip-icon" title="Время последнего сканирования">?</span></div>
+                <div class="value" style="color: var(--accent-green); font-size: 28px;">2 мин</div>
+                <div class="subtext">назад</div>
+                <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15)">🔄</div>
+            </div>
+        </div>
+
+        <!-- Map Section -->
+        <div class="section-header">
+            <div class="section-title">
+                <span class="dot"></span>
+                Карта ям г. Алматы
+                <span class="tooltip-icon" title="Интерактивная карта с расположением дорожных ям">?</span>
+            </div>
+        </div>
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-overlay-info">
+                <strong>Тип объекта:</strong> Дорожные ямы<br>
+                <strong>Город:</strong> Алматы<br>
+                <strong>Район:</strong> Все районы<br>
+                <small style="color: var(--text-muted); display:block; margin-top:6px;">Нажмите на маркер для просмотра деталей</small>
+            </div>
+            <div class="map-legend">
+                <div class="legend-item">
+                    <div class="legend-circle" style="background: var(--accent-red);"></div>
+                    Критическая (> 30 см)
+                </div>
+                <div class="legend-item">
+                    <div class="legend-circle" style="background: var(--accent-orange);"></div>
+                    Высокая (20-30 см)
+                </div>
+                <div class="legend-item">
+                    <div class="legend-circle" style="background: var(--accent-yellow);"></div>
+                    Средняя (10-20 см)
+                </div>
+                <div class="legend-item">
+                    <div class="legend-circle" style="background: var(--accent-green);"></div>
+                    Низкая (< 10 см)
+                </div>
+            </div>
+        </div>
+
+        <!-- District Breakdown -->
+        <div class="panel-card animate-in" style="animation-delay: 0.6s">
+            <div class="panel-card-title">📊 Распределение по районам</div>
+            <div id="districtBreakdown"></div>
+        </div>
+
+        <!-- Weekly Trend Chart -->
+        <div class="panel-card animate-in" style="animation-delay: 0.7s">
+            <div class="panel-card-title">📈 Динамика обнаружения (последние 7 дней)</div>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+        <!-- Weather Alert -->
+        <div class="weather-alert">
+            <div class="icon">🌡️</div>
+            <div class="text">
+                <strong>Внимание: Цикл заморозки-оттаивания</strong><br>
+                Ночная температура -3°C, дневная +8°C. Ожидается ускоренное разрушение дорожного покрытия в ближайшие 5 дней. Рекомендуется усиленный мониторинг.
+            </div>
+        </div>
+
+        <!-- Dispatch Recommendation -->
+        <div class="panel-card">
+            <div class="panel-card-title">🚨 Рекомендации по диспетчеризации</div>
+
+            <div class="recommendation" id="mainRecommendation">
+                <div class="rec-header">
+                    <span>🔴</span>
+                    <span>СРОЧНЫЙ ВЫЕЗД ТРЕБУЕТСЯ</span>
+                </div>
+                <div class="rec-body">
+                    Обнаружено <strong>3 критических ямы</strong> глубиной более 20 см.
+                    Рекомендуется направить <strong>2 ремонтные бригады</strong> в районы
+                    <strong>Алмалинский</strong> и <strong>Бостандыкский</strong>.
+                    Приоритетный маршрут рассчитан.
+                </div>
+                <div class="priority-score">
+                    <span style="font-size: 12px; color: var(--text-muted);">Приоритет:</span>
+                    <div class="priority-bar">
+                        <div class="priority-fill" style="width: 85%; background: linear-gradient(90deg, var(--accent-orange), var(--accent-red));"></div>
+                    </div>
+                    <span style="font-size: 13px; font-weight: 700; color: var(--accent-red);">85%</span>
+                </div>
+            </div>
+
+            <div class="recommendation warning">
+                <div class="rec-header">
+                    <span>🟡</span>
+                    <span>Плановый ремонт</span>
+                </div>
+                <div class="rec-body">
+                    <strong>2 ямы</strong> средней тяжести в <strong>Медеуском</strong> районе.
+                    Рекомендуется включить в плановый график ремонта на текущую неделю.
+                </div>
+            </div>
+
+            <div class="recommendation ok">
+                <div class="rec-header">
+                    <span>🟢</span>
+                    <span>Мониторинг</span>
+                </div>
+                <div class="rec-body">
+                    <strong>1 яма</strong> низкой степени тяжести. Требуется повторная проверка через 7 дней.
+                </div>
+            </div>
+        </div>
+
+        <!-- Crew Status -->
+        <div class="panel-card">
+            <div class="panel-card-title">👷 Статус ремонтных бригад</div>
+            <div class="crew-item">
+                <div class="crew-avatar" style="background: rgba(16, 185, 129, 0.15);">🚛</div>
+                <div class="crew-info">
+                    <div class="crew-name">Бригада №1</div>
+                    <div class="crew-role">Асфальтоукладка · 4 человека</div>
+                </div>
+                <div class="crew-status status-available">Свободна</div>
+            </div>
+            <div class="crew-item">
+                <div class="crew-avatar" style="background: rgba(245, 158, 11, 0.15);">🚜</div>
+                <div class="crew-info">
+                    <div class="crew-name">Бригада №2</div>
+                    <div class="crew-role">Ямочный ремонт · 3 человека</div>
+                </div>
+                <div class="crew-status status-busy">На выезде</div>
+            </div>
+            <div class="crew-item">
+                <div class="crew-avatar" style="background: rgba(59, 130, 246, 0.15);">🔧</div>
+                <div class="crew-info">
+                    <div class="crew-name">Бригада №3</div>
+                    <div class="crew-role">Капитальный ремонт · 6 человек</div>
+                </div>
+                <div class="crew-status status-available">Свободна</div>
+            </div>
+            <div class="crew-item">
+                <div class="crew-avatar" style="background: rgba(100, 116, 139, 0.15);">🏗️</div>
+                <div class="crew-info">
+                    <div class="crew-name">Бригада №4</div>
+                    <div class="crew-role">Дорожная разметка · 3 человека</div>
+                </div>
+                <div class="crew-status status-offline">Не на смене</div>
+            </div>
+        </div>
+
+        <!-- Pothole List -->
+        <div class="panel-card">
+            <div class="panel-card-title">🕳️ Реестр обнаруженных ям</div>
+            <div class="filter-tabs">
+                <div class="filter-tab active" onclick="filterPotholes('all')">Все</div>
+                <div class="filter-tab" onclick="filterPotholes('critical')">Критич.</div>
+                <div class="filter-tab" onclick="filterPotholes('high')">Высокая</div>
+                <div class="filter-tab" onclick="filterPotholes('medium')">Средняя</div>
+            </div>
+            <div class="pothole-list" id="potholeList"></div>
+        </div>
+
+        <!-- Severity Chart -->
+        <div class="panel-card">
+            <div class="panel-card-title">🎯 Распределение по степени тяжести</div>
+            <div class="chart-container" style="height: 200px;">
+                <canvas id="severityChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Cost Estimate -->
+        <div class="panel-card">
+            <div class="panel-card-title">💰 Оценка стоимости ремонта</div>
+            <div class="district-row">
+                <span style="color: var(--text-secondary);">Критические (3)</span>
+                <span style="font-weight: 700; color: var(--accent-red);">₸ 450,000</span>
+            </div>
+            <div class="district-row">
+                <span style="color: var(--text-secondary);">Высокой тяжести (1)</span>
+                <span style="font-weight: 700; color: var(--accent-orange);">₸ 120,000</span>
+            </div>
+            <div class="district-row">
+                <span style="color: var(--text-secondary);">Средней тяжести (1)</span>
+                <span style="font-weight: 700; color: var(--accent-yellow);">₸ 55,000</span>
+            </div>
+            <div class="district-row">
+                <span style="color: var(--text-secondary);">Низкой тяжести (1)</span>
+                <span style="font-weight: 700; color: var(--accent-green);">₸ 15,000</span>
+            </div>
+            <div class="district-row" style="border-top: 2px solid var(--border); margin-top: 4px; padding-top: 12px;">
+                <span style="font-weight: 700;">ИТОГО</span>
+                <span style="font-weight: 800; font-size: 16px; color: var(--accent-blue);">₸ 640,000</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Photo Modal -->
+<div class="modal-overlay" id="photoModal">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <img class="modal-image" id="modalImage" src="" alt="Потхоул">
+        <div class="modal-body">
+            <h2 id="modalTitle"></h2>
+            <div class="modal-meta">
+                <div class="meta-item">
+                    <div class="meta-label">Степень тяжести</div>
+                    <div class="meta-value" id="modalSeverity"></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Примерная глубина</div>
+                    <div class="meta-value" id="modalDepth"></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Район</div>
+                    <div class="meta-value" id="modalDistrict"></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Адрес</div>
+                    <div class="meta-value" id="modalAddress"></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Дата обнаружения</div>
+                    <div class="meta-value" id="modalDate"></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Оценка ремонта</div>
+                    <div class="meta-value" id="modalCost"></div>
+                </div>
+            </div>
+            <div id="modalRecommendation" style="margin-bottom: 16px;"></div>
+            <button class="dispatch-btn" onclick="dispatchCrew()">
+                🚛 Направить ремонтную бригаду
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+    // ==================== DATA ====================
+    const potholes = [
+        {
+            id: 1,
+            name: "Яма #1 — Трасса",
+            image: "images/Pothole1.jpg",
+            lat: 43.2220,
+            lng: 76.8512,
+            severity: "medium",
+            severityLabel: "Средняя",
+            depth: "~12 см",
+            district: "Медеуский",
+            address: "пр. Аль-Фараби, 77",
+            date: "02.04.2026",
+            cost: "₸ 55,000",
+            description: "Две малые ямы на проезжей части трассы. Обнаружены при мониторинге с видеорегистратора.",
+            priority: 45,
+            color: "#f59e0b",
+            radius: 14
+        },
+        {
+            id: 2,
+            name: "Яма #2 — Критическая",
+            image: "images/pothhole2.png",
+            lat: 43.2565,
+            lng: 76.9286,
+            severity: "critical",
+            severityLabel: "Критическая",
+            depth: "~35 см",
+            district: "Алмалинский",
+            address: "ул. Жибек Жолы, 50",
+            date: "01.04.2026",
+            cost: "₸ 180,000",
+            description: "Глубокая яма с разрушенным основанием. Угроза безопасности движения. Требуется немедленный ремонт.",
+            priority: 95,
+            color: "#ef4444",
+            radius: 22
+        },
+        {
+            id: 3,
+            name: "Яма #3 — Глубокая",
+            image: "images/pothhole3.png",
+            lat: 43.2380,
+            lng: 76.9455,
+            severity: "critical",
+            severityLabel: "Критическая",
+            depth: "~40 см",
+            district: "Бостандыкский",
+            address: "ул. Тимирязева, 28А",
+            date: "31.03.2026",
+            cost: "₸ 150,000",
+            description: "Глубокая яма с обнажённым грунтом. Опасность провала для легковых автомобилей.",
+            priority: 98,
+            color: "#ef4444",
+            radius: 24
+        },
+        {
+            id: 4,
+            name: "Яма #4 — На дороге",
+            image: "images/pothhole4.png",
+            lat: 43.2700,
+            lng: 76.8950,
+            severity: "high",
+            severityLabel: "Высокая",
+            depth: "~22 см",
+            district: "Алмалинский",
+            address: "ул. Гоголя, 111",
+            date: "02.04.2026",
+            cost: "₸ 120,000",
+            description: "Яма на проезжей части рядом с перекрёстком. Высокий трафик. Рекомендуется срочный ремонт.",
+            priority: 78,
+            color: "#f97316",
+            radius: 18
+        },
+        {
+            id: 5,
+            name: "Яма #5 — С водой",
+            image: "images/pothhole5.png",
+            lat: 43.2100,
+            lng: 76.8780,
+            severity: "critical",
+            severityLabel: "Критическая",
+            depth: "~30 см",
+            district: "Бостандыкский",
+            address: "ул. Сатпаева, 90",
+            date: "03.04.2026",
+            cost: "₸ 120,000",
+            description: "Яма заполнена водой — реальная глубина не видна водителям. Крайне опасная ситуация.",
+            priority: 92,
+            color: "#ef4444",
+            radius: 20
+        },
+        {
+            id: 6,
+            name: "Яма #6 — Малая",
+            image: "images/pothhole6.png",
+            lat: 43.2480,
+            lng: 76.9120,
+            severity: "low",
+            severityLabel: "Низкая",
+            depth: "~7 см",
+            district: "Медеуский",
+            address: "ул. Кабанбай Батыра, 162",
+            date: "03.04.2026",
+            cost: "₸ 15,000",
+            description: "Неглубокая яма малого размера. Рекомендуется мониторинг и плановый ремонт.",
+            priority: 20,
+            color: "#10b981",
+            radius: 10
+        }
+    ];
+
+    // ==================== DATE ====================
+    const now = new Date();
+    document.getElementById('currentDate').textContent = now.toLocaleDateString('ru-RU', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    // ==================== MAP ====================
+    const map = L.map('map', {
+        zoomControl: false
+    }).setView([43.2380, 76.9060], 12);
+
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19
+    }).addTo(map);
+
+    // Add pothole markers
+    potholes.forEach(p => {
+        const marker = L.circleMarker([p.lat, p.lng], {
+            radius: p.radius,
+            fillColor: p.color,
+            color: p.color,
+            weight: 2,
+            opacity: 0.9,
+            fillOpacity: 0.5,
+            className: 'pothole-marker'
+        }).addTo(map);
+
+        // Animated pulsing for critical
+        if (p.severity === 'critical') {
+            const pulseMarker = L.circleMarker([p.lat, p.lng], {
+                radius: p.radius + 8,
+                fillColor: p.color,
+                color: p.color,
+                weight: 1,
+                opacity: 0.3,
+                fillOpacity: 0.1,
+            }).addTo(map);
+        }
+
+        const popupContent = `
+            <div class="popup-content">
+                <h3>${p.name}</h3>
+                <p><strong>Район:</strong> ${p.district}</p>
+                <p><strong>Адрес:</strong> ${p.address}</p>
+                <p><strong>Тяжесть:</strong> <span style="color: ${p.color}; font-weight: 700;">${p.severityLabel}</span></p>
+                <p><strong>Глубина:</strong> ${p.depth}</p>
+                <button class="popup-btn" onclick="openModal(${p.id})">📷 Смотреть фото и детали</button>
+            </div>
+        `;
+
+        marker.bindPopup(popupContent);
+    });
+
+    // ==================== MODAL ====================
+    function openModal(id) {
+        const p = potholes.find(x => x.id === id);
+        if (!p) return;
+
+        document.getElementById('modalImage').src = p.image;
+        document.getElementById('modalTitle').textContent = p.name;
+        document.getElementById('modalSeverity').innerHTML = `<span class="severity-badge severity-${p.severity}">${p.severityLabel}</span>`;
+        document.getElementById('modalDepth').textContent = p.depth;
+        document.getElementById('modalDistrict').textContent = p.district;
+        document.getElementById('modalAddress').textContent = p.address;
+        document.getElementById('modalDate').textContent = p.date;
+        document.getElementById('modalCost').textContent = p.cost;
+
+        let recHtml = '';
+        if (p.severity === 'critical') {
+            recHtml = `<div class="recommendation">
+                <div class="rec-header"><span>🔴</span> <span>РЕКОМЕНДАЦИЯ: Немедленный выезд бригады</span></div>
+                <div class="rec-body">${p.description}<br><br>Рекомендуется направить бригаду капитального ремонта. Ориентировочное время работ: <strong>4-6 часов</strong>.</div>
+            </div>`;
+        } else if (p.severity === 'high') {
+            recHtml = `<div class="recommendation warning">
+                <div class="rec-header"><span>🟠</span> <span>РЕКОМЕНДАЦИЯ: Срочный ремонт</span></div>
+                <div class="rec-body">${p.description}<br><br>Включить в приоритетный план ремонта на <strong>ближайшие 48 часов</strong>.</div>
+            </div>`;
+        } else if (p.severity === 'medium') {
+            recHtml = `<div class="recommendation warning">
+                <div class="rec-header"><span>🟡</span> <span>РЕКОМЕНДАЦИЯ: Плановый ремонт</span></div>
+                <div class="rec-body">${p.description}<br><br>Включить в еженедельный план ремонта. Срок: <strong>текущая неделя</strong>.</div>
+            </div>`;
+        } else {
+            recHtml = `<div class="recommendation ok">
+                <div class="rec-header"><span>🟢</span> <span>РЕКОМЕНДАЦИЯ: Мониторинг</span></div>
+                <div class="rec-body">${p.description}<br><br>Повторная проверка через <strong>7 дней</strong>. При ухудшении — перевести в категорию «Средняя».</div>
+            </div>`;
+        }
+        document.getElementById('modalRecommendation').innerHTML = recHtml;
+
+        document.getElementById('photoModal').classList.add('active');
+    }
+
+    function closeModal() {
+        document.getElementById('photoModal').classList.remove('active');
+    }
+
+    document.getElementById('photoModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    function dispatchCrew() {
+        alert('✅ Заявка на выезд ремонтной бригады отправлена!\n\nДиспетчерская служба уведомлена.\nОжидаемое время прибытия: 30-45 минут.');
+        closeModal();
+    }
+
+    // ==================== POTHOLE LIST ====================
+    function renderPotholeList(filter = 'all') {
+        const list = document.getElementById('potholeList');
+        const filtered = filter === 'all' ? potholes : potholes.filter(p => p.severity === filter);
+
+        // Sort by priority descending
+        const sorted = [...filtered].sort((a, b) => b.priority - a.priority);
+
+        list.innerHTML = sorted.map(p => `
+            <div class="pothole-item" onclick="openModal(${p.id})" data-severity="${p.severity}">
+                <img class="pothole-thumb" src="${p.image}" alt="${p.name}">
+                <div class="pothole-info">
+                    <div class="name">${p.name}</div>
+                    <div class="address">${p.address}</div>
+                </div>
+                <span class="severity-badge severity-${p.severity}">${p.severityLabel}</span>
+            </div>
+        `).join('');
+    }
+
+    function filterPotholes(filter) {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        renderPotholeList(filter);
+    }
+
+    renderPotholeList();
+
+    // ==================== DISTRICT BREAKDOWN ====================
+    function renderDistrictBreakdown() {
+        const districts = {};
+        potholes.forEach(p => {
+            districts[p.district] = (districts[p.district] || 0) + 1;
+        });
+
+        const maxCount = Math.max(...Object.values(districts));
+        const colors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
+        let i = 0;
+
+        const container = document.getElementById('districtBreakdown');
+        container.innerHTML = Object.entries(districts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => {
+                const color = colors[i++ % colors.length];
+                const pct = (count / maxCount) * 100;
+                return `
+                    <div class="district-row">
+                        <span style="min-width: 130px; color: var(--text-secondary);">${name}</span>
+                        <div class="district-bar-wrapper">
+                            <div class="district-bar" style="width: ${pct}%; background: ${color};"></div>
+                        </div>
+                        <span style="font-weight: 700; min-width: 30px; text-align: right;">${count}</span>
+                    </div>
+                `;
+            }).join('');
+    }
+
+    renderDistrictBreakdown();
+
+    // ==================== CHARTS ====================
+    // Trend Chart
+    const trendCtx = document.getElementById('trendChart').getContext('2d');
+    new Chart(trendCtx, {
+        type: 'line',
+        data: {
+            labels: ['28.03', '29.03', '30.03', '31.03', '01.04', '02.04', '03.04'],
+            datasets: [{
+                label: 'Обнаружено ям',
+                data: [2, 2, 3, 4, 5, 6, 6],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#3b82f6',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6
+            }, {
+                label: 'Отремонтировано',
+                data: [1, 1, 1, 2, 2, 2, 2],
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#10b981',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } },
+                    grid: { color: 'rgba(42, 53, 80, 0.5)' }
+                },
+                y: {
+                    ticks: { color: '#64748b', font: { family: 'Inter', size: 11 }, stepSize: 1 },
+                    grid: { color: 'rgba(42, 53, 80, 0.5)' }
+                }
+            }
+        }
+    });
+
+    // Severity Doughnut Chart
+    const sevCtx = document.getElementById('severityChart').getContext('2d');
+    new Chart(sevCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Критическая', 'Высокая', 'Средняя', 'Низкая'],
+            datasets: [{
+                data: [3, 1, 1, 1],
+                backgroundColor: ['#ef4444', '#f97316', '#f59e0b', '#10b981'],
+                borderColor: '#1a2236',
+                borderWidth: 3,
+                hoverOffset: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '65%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#94a3b8',
+                        font: { family: 'Inter', size: 12 },
+                        padding: 12,
+                        usePointStyle: true,
+                        pointStyleWidth: 10
+                    }
+                }
+            }
+        }
+    });
+</script>
+</body>
+</html>
