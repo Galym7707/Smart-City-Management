@@ -4912,8 +4912,9 @@ body {
   font-size: 0.84rem;
 }
 
-.scm-aq-gauge,
-.scm-aq-dial,
+.scm-aq-summary-card,
+.scm-aq-summary-top,
+.scm-aq-mini-stack,
 .scm-reco-list,
 .scm-district-grid,
 .scm-flood-zone-header,
@@ -4931,24 +4932,137 @@ body {
   gap: 14px;
 }
 
-.scm-aq-dial {
-  place-items: center;
-  width: min(100%, 280px);
-  aspect-ratio: 1 / 1;
-  margin: 0 auto;
+.scm-aq-summary-card {
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    radial-gradient(circle at top left, rgba(71, 166, 255, 0.18), transparent 34%);
+}
+
+.scm-aq-summary-top {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.72fr);
+  align-items: start;
+}
+
+.scm-aq-summary-copy {
+  display: grid;
+  gap: 12px;
+}
+
+.scm-aq-summary-eyebrow {
+  color: rgba(235, 242, 249, 0.62);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scm-aq-summary-copy strong {
+  font-size: clamp(3.1rem, 6vw, 4.8rem);
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+}
+
+.scm-aq-summary-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scm-aq-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
   border-radius: 999px;
-  border: 10px solid rgba(255, 255, 255, 0.06);
-  background: conic-gradient(#ff5c4d 0 25%, #ff9f3d 25% 55%, #4ade80 55% 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.scm-aq-dial strong {
-  font-size: 3rem;
-  line-height: 1;
+.scm-aq-summary-updated {
+  color: rgba(235, 242, 249, 0.62);
+  font-size: 0.84rem;
 }
 
-.scm-aq-status {
-  text-align: center;
+.scm-aq-summary-copy p {
+  margin: 0;
+  color: rgba(235, 242, 249, 0.78);
+  line-height: 1.6;
+}
+
+.scm-aq-mini-stack {
+  align-content: start;
+}
+
+.scm-aq-mini-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scm-aq-mini-card span {
+  color: rgba(235, 242, 249, 0.62);
+  font-size: 0.74rem;
   font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.scm-aq-mini-card strong {
+  font-size: 1.02rem;
+  line-height: 1.35;
+}
+
+.scm-aq-scale-wrap {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.scm-aq-scale-track {
+  position: relative;
+  height: 18px;
+  border-radius: 999px;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, #4ade80 0 28%, #ffcf70 28% 56%, #ff9f3d 56% 83%, #ff5c4d 83% 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.scm-aq-scale-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02));
+}
+
+.scm-aq-scale-pointer {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 3px solid #0d1424;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(7, 12, 24, 0.4);
+  transform: translate(-50%, -50%);
+}
+
+.scm-aq-scale-legend {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  color: rgba(235, 242, 249, 0.62);
+  font-size: 0.76rem;
 }
 
 .scm-district-card,
@@ -5415,6 +5529,11 @@ body {
   .scm-health-alert-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .scm-aq-summary-top,
+  .scm-aq-scale-legend {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -5821,6 +5940,11 @@ body {
   .scm-pothole-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .scm-aq-summary-top,
+  .scm-aq-scale-legend {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -5828,6 +5952,11 @@ body {
   .scm-district-grid,
   .scm-pothole-grid,
   .scm-pothole-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scm-aq-summary-top,
+  .scm-aq-scale-legend {
     grid-template-columns: 1fr;
   }
 }

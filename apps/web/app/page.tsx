@@ -2052,6 +2052,7 @@ function AirQualityPanel({
   const healthInsight = buildHealthInsight(airSnapshot, trafficSnapshot);
   const updatedAt = formatAlmatyTime(airSnapshot?.timestamp || airSnapshot?.refreshedAt);
   const pm25Multiple = pm25Value > 0 ? (pm25Value / WHO_PM25_GUIDELINE).toFixed(1) : "0.0";
+  const aqiScalePct = Math.min(100, Math.max(0, (aqiValue / 180) * 100));
   const freshStationsCount = airMapSnapshot?.freshStationsCount ?? 0;
   const airMapPoints: SignalMapPoint[] = (airMapSnapshot?.stations ?? []).map((station) => {
     const pm25State = getPm25State(station.pm25);
@@ -2150,12 +2151,62 @@ function AirQualityPanel({
           help="Здесь больше нет fake-районов: секция показывает реальный city average из AIR API по Алматы."
         />
         <div className="scm-aq-header-grid">
-          <div className="scm-aq-gauge">
-            <div className="scm-aq-dial">
-              <strong>{aqiValue}</strong>
-              <span>AQI Алматы</span>
+          <div className="scm-aq-summary-card">
+            <div className="scm-aq-summary-top">
+              <div className="scm-aq-summary-copy">
+                <span className="scm-aq-summary-eyebrow">Городской индекс воздуха</span>
+                <strong>{aqiValue}</strong>
+                <div className="scm-aq-summary-inline">
+                  <span
+                    className="scm-aq-summary-badge"
+                    style={{
+                      color: airState.color,
+                      borderColor: `${airState.color}44`,
+                      background: `${airState.color}14`,
+                    }}
+                  >
+                    {airState.label}
+                  </span>
+                  <span className="scm-aq-summary-updated">{updatedAt}</span>
+                </div>
+                <p>
+                  PM2.5 {pm25Value > 0 ? `${pm25Value.toFixed(1)} µg/m³` : "нет данных"} · PM10{" "}
+                  {pm10Value > 0 ? `${pm10Value.toFixed(1)} µg/m³` : "нет данных"}
+                </p>
+              </div>
+
+              <div className="scm-aq-mini-stack">
+                <div className="scm-aq-mini-card">
+                  <span>PM2.5</span>
+                  <strong style={{ color: "#ff9f3d" }}>
+                    {pm25Value > 0 ? `${pm25Value.toFixed(1)} µg/m³` : "—"}
+                  </strong>
+                </div>
+                <div className="scm-aq-mini-card">
+                  <span>PM10</span>
+                  <strong style={{ color: "#47a6ff" }}>
+                    {pm10Value > 0 ? `${pm10Value.toFixed(1)} µg/m³` : "—"}
+                  </strong>
+                </div>
+                <div className="scm-aq-mini-card">
+                  <span>Станции</span>
+                  <strong style={{ color: "#a78bfa" }}>{stationsTotal}</strong>
+                </div>
+              </div>
             </div>
-            <div className="scm-aq-status" style={{ color: airState.color }}>{airState.label}</div>
+
+            <div className="scm-aq-scale-wrap">
+              <div className="scm-aq-scale-track">
+                <div className="scm-aq-scale-fill" style={{ width: `${aqiScalePct}%` }} />
+                <div className="scm-aq-scale-pointer" style={{ left: `${aqiScalePct}%` }} />
+              </div>
+              <div className="scm-aq-scale-legend">
+                <span>0 · Хорошо</span>
+                <span>50 · Умеренно</span>
+                <span>100 · Вредно</span>
+                <span>150+</span>
+              </div>
+            </div>
           </div>
           <div className="scm-district-grid">
             <div className="scm-district-card">
