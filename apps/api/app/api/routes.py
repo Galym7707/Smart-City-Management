@@ -2,10 +2,13 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Response, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 
 from app.models import (
     ActivityFeedPayload,
     Anomaly,
+    CrimeIncident,
+    CrimeMonitorSnapshot,
     CreateTaskRequest,
     DashboardPayload,
     GenerateReportResponse,
@@ -16,6 +19,7 @@ from app.models import (
     PipelineSyncResponse,
     PromoteAnomalyRequest,
 )
+from app.services.crime_monitor import get_crime_incident, get_crime_snapshot, get_crime_video_path
 from app.services.pipeline_scheduler import PipelineScheduler
 from app.services.workflow_store import WorkflowStore
 from app.services.pipeline_service import PipelineService
@@ -55,6 +59,32 @@ async def get_pipeline_history(limit: int = 10) -> PipelineHistoryPayload:
     return PipelineHistoryPayload(
         runs=store.list_pipeline_history(limit=limit),
         schedule=pipeline_scheduler.status(),
+    )
+
+
+@router.get("/crime/incidents", response_model=CrimeMonitorSnapshot)
+async def get_crime_monitor() -> CrimeMonitorSnapshot:
+    return get_crime_snapshot()
+
+
+@router.get("/crime/incidents/{incident_id}", response_model=CrimeIncident)
+async def get_crime_incident_detail(incident_id: int) -> CrimeIncident:
+    incident = get_crime_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail=f"Unknown crime incident {incident_id}")
+    return incident
+
+
+@router.get("/crime/incidents/{incident_id}/video")
+async def get_crime_incident_video(incident_id: int) -> FileResponse:
+    video_path = get_crime_video_path(incident_id)
+    if video_path is None:
+        raise HTTPException(status_code=404, detail=f"Video unavailable for crime incident {incident_id}")
+
+    return FileResponse(
+        path=video_path,
+        media_type="video/quicktime",
+        filename=video_path.name,
     )
 
 

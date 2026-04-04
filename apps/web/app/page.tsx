@@ -14,9 +14,12 @@ import type { Anomaly } from "../lib/dashboard-types";
 import {
   type AlmatyAirMapSnapshot,
   type AlmatyAirSnapshot,
+  type CrimeIncidentSnapshot,
+  type CrimeMonitorSnapshot,
   type HealthAlertSnapshot,
   loadAlmatyAirMapSnapshot,
   loadAlmatyAirSnapshot,
+  loadCrimeMonitorSnapshot,
   loadHealthAlertSnapshot,
   loadTrafficJamSnapshot,
   type TrafficJamSnapshot,
@@ -83,10 +86,11 @@ const FEATURES: Feature[] = [
   {
     id: "risk-workflow",
     icon: "◇",
-    short: "RCA",
-    label: "Очередь рисков",
-    overview: "Risk queue, workflow и root cause.",
-    help: "Это operational loop: сигнал, очередь, инцидент, задачи, отчёт и краткий разбор вероятных причин.",
+    short: "SAFE",
+    label: "Безопасность",
+    overview: "Crime-контур по камерам: драки, ссоры, видео и статус реагирования.",
+    help: "Модуль безопасности показывает зафиксированные драки и ссоры, карту инцидентов, живое видео и готовность патрульных экипажей.",
+    badge: "LIVE",
     color: "#b289ff",
   },
   {
@@ -114,7 +118,7 @@ const FAQ_ITEMS = [
     id: "platform",
     question: "Что это за платформа?",
     answer:
-      "Это Smart City Management для Алматы: один экран, где город видит CH4, ДТП, воздух, очередь рисков, прогнозы и отчётный контур.",
+      "Это Smart City Management для Алматы: один экран, где город видит CH4, ДТП, воздух, безопасность, дорожные дефекты и отчётный контур.",
   },
   {
     id: "state",
@@ -126,7 +130,7 @@ const FAQ_ITEMS = [
     id: "modules",
     question: "Почему здесь 6 отдельных модулей?",
     answer:
-      "Потому что это не один узкий дашборд, а полноценный городской command center: экология, трафик, воздух, risk queue, прогнозы и отчёты.",
+      "Потому что это не один узкий дашборд, а полноценный городской command center: экология, трафик, воздух, безопасность, дорожные дефекты и отчёты.",
   },
   {
     id: "assistant",
@@ -450,6 +454,70 @@ function buildPotholeMapPoints(): SignalMapPoint[] {
   }));
 }
 
+function getCrimeSeverityColor(severity: CrimeIncidentSnapshot["severity"]) {
+  switch (severity) {
+    case "critical":
+      return "#ef4444";
+    case "high":
+      return "#f97316";
+    default:
+      return "#f59e0b";
+  }
+}
+
+function getCrimeSeverityHelp(severity: CrimeIncidentSnapshot["severity"]) {
+  switch (severity) {
+    case "critical":
+      return "Критический инцидент: есть высокий риск повторной эскалации или уже доступно видео для оперативного разбора.";
+    case "high":
+      return "Высокий приоритет: инцидент требует быстрого выезда патруля и проверки видеодоказательств.";
+    default:
+      return "Средний приоритет: ситуацию нужно зафиксировать и поставить в контроль повторного наблюдения.";
+  }
+}
+
+function getPatrolStatusTone(status: "available" | "responding" | "busy") {
+  switch (status) {
+    case "available":
+      return {
+        color: "#4ade80",
+        background: "rgba(74, 222, 128, 0.16)",
+        border: "rgba(74, 222, 128, 0.22)",
+      };
+    case "responding":
+      return {
+        color: "#f59e0b",
+        background: "rgba(245, 158, 11, 0.16)",
+        border: "rgba(245, 158, 11, 0.22)",
+      };
+    default:
+      return {
+        color: "#94a3b8",
+        background: "rgba(148, 163, 184, 0.16)",
+        border: "rgba(148, 163, 184, 0.2)",
+      };
+  }
+}
+
+function buildCrimeMapPoints(crimeSnapshot: CrimeMonitorSnapshot | null): SignalMapPoint[] {
+  return (crimeSnapshot?.incidents ?? []).map((incident) => ({
+    id: `crime-${incident.id}`,
+    label: incident.name,
+    latitude: incident.latitude,
+    longitude: incident.longitude,
+    value: incident.severityLabel,
+    category: incident.district,
+    description: `${incident.address} · ${incident.time}`,
+    color: incident.color,
+    meta: [
+      { label: "Тип", value: incident.type },
+      { label: "Статус", value: incident.responseStatus },
+      { label: "Участники", value: incident.participants },
+      { label: "Камера", value: incident.cameraLabel },
+    ],
+  }));
+}
+
 function buildHealthInsight(
   airSnapshot: AlmatyAirSnapshot | null,
   trafficSnapshot: TrafficJamSnapshot | null,
@@ -537,6 +605,7 @@ function buildAiModuleContext(
   dashboardState: DashboardHydrationState,
   airSnapshot: AlmatyAirSnapshot | null,
   trafficSnapshot: TrafficJamSnapshot | null,
+  crimeSnapshot: CrimeMonitorSnapshot | null,
 ): AiModuleContext {
   const feature = FEATURES.find((item) => item.id === featureId) ?? FEATURES[0];
   const leadAnomaly = dashboardState.anomalies[0];
@@ -697,48 +766,57 @@ function buildAiModuleContext(
         ],
       };
     case "risk-workflow":
+      const crimeIncidents = crimeSnapshot?.incidents ?? [];
+      const criticalCrimeCount = crimeIncidents.filter((incident) => incident.severity === "critical").length;
+      const highCrimeCount = crimeIncidents.filter((incident) => incident.severity === "high").length;
+      const videoCrimeCount = crimeIncidents.filter((incident) => incident.hasVideo).length;
+      const leadCrimeIncident = crimeIncidents[0];
       return {
         featureId,
         featureLabel: feature.label,
         overview: feature.overview,
-        defaultSeverity: "Высокая",
+        defaultSeverity: criticalCrimeCount > 0 ? "Критическая" : "Высокая",
         severityReasonHint:
-          "В очереди уже несколько красных кейсов, и просрочка по SLA быстро снижает управляемость.",
+          criticalCrimeCount > 0
+            ? "Есть инцидент с доступным видео и высоким риском эскалации, поэтому контур безопасности требует немедленного разбора."
+            : "Несколько инцидентов уже требуют выезда и проверки видеоканалов, поэтому модуль остаётся в высоком приоритете.",
         metrics: [
           {
-            label: "В очереди",
-            value: "6",
-            detail: "Кейсы, которые ждут решения в risk queue.",
+            label: "Инцидентов",
+            value: String(crimeIncidents.length || 0),
+            detail: "Сколько кейсов драк и ссор сейчас находится в рабочем контуре безопасности.",
           },
           {
-            label: "Красных кейсов",
-            value: "3",
-            detail: "Самые приоритетные сигналы в текущем контуре.",
+            label: "Критических",
+            value: String(criticalCrimeCount),
+            detail: "Инциденты, где нужен самый быстрый разбор и подтверждение материалов.",
           },
           {
-            label: "Средний SLA",
-            value: "1.8ч",
-            detail: "Окно обработки по текущему сценарию.",
+            label: "С видео",
+            value: String(videoCrimeCount),
+            detail: "Сколько кейсов уже имеют доступный видеофрагмент для просмотра.",
           },
           {
-            label: "Открытых инцидентов",
-            value: String(openIncidents),
-            detail: "Инциденты, уже поднятые из сигналов в workflow.",
+            label: "Пиковое окно",
+            value: crimeSnapshot?.peakWindow ?? "нет данных",
+            detail: "Интервал суток, где риск драк и ссор сейчас самый высокий.",
           },
         ],
         findings: [
-          "Risk queue собирает сигналы в единый operational workflow и не даёт им потеряться между службами.",
-          "Часть кейсов уже в красной зоне и требует owner, SLA и понятного следующего шага.",
-          "Именно здесь платформа перестаёт быть просто дашбордом и становится рабочим инструментом.",
+          leadCrimeIncident
+            ? `${leadCrimeIncident.name} в ${leadCrimeIncident.district} остаётся главным кейсом по приоритету для штаба безопасности.`
+            : "Контур безопасности ждёт первый загруженный инцидент из backend API.",
+          `${highCrimeCount + criticalCrimeCount} кейсов уже требуют ускоренного реагирования и проверки городских камер.`,
+          "Модуль безопасности соединяет карту, видео и готовность патрулей в единый городской operational workflow.",
         ],
         recommendedFocus: [
-          "Зафиксировать owner и срок реакции по каждому красному кейсу.",
-          "Дотянуть критичные кейсы до задач и отчёта, а не оставлять на уровне сигнала.",
-          "Использовать очередь как единый вход для межмодульных проблем города.",
+          "Подтвердить критический кейс с видео и зафиксировать ответственный экипаж.",
+          "Усилить патрулирование в районах, где сигналы повторяются в вечернее окно.",
+          "Передать AI rail сводку по районам и краткий отчёт для оперативного штаба.",
         ],
         crossModuleSignals: [
-          "Risk queue связывает CH4, ДТП, воздух, прогноз и отчёт в один управленческий контур.",
-          "Без этой очереди модули живут отдельно и не дают цельной реакции штабу.",
+          "Контур безопасности нужно читать вместе с транспортом: перегруженные узлы и ночные пики повышают риск конфликтов у ТЦ, метро и остановок.",
+          "AI Assistant может сразу перевести карту инцидентов и видео в короткие управленческие рекомендации по районам.",
         ],
       };
     case "forecast-center":
@@ -932,6 +1010,7 @@ export default function Page() {
   const [airSnapshot, setAirSnapshot] = useState<AlmatyAirSnapshot | null>(null);
   const [airMapSnapshot, setAirMapSnapshot] = useState<AlmatyAirMapSnapshot | null>(null);
   const [trafficSnapshot, setTrafficSnapshot] = useState<TrafficJamSnapshot | null>(null);
+  const [crimeSnapshot, setCrimeSnapshot] = useState<CrimeMonitorSnapshot | null>(null);
   const [healthAlert, setHealthAlert] = useState<HealthAlertSnapshot | null>(null);
   const [healthAlertLoading, setHealthAlertLoading] = useState(false);
 
@@ -1021,6 +1100,27 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false;
 
+    const refreshCrime = async () => {
+      const snapshot = await loadCrimeMonitorSnapshot();
+      if (!cancelled && snapshot) {
+        setCrimeSnapshot(snapshot);
+      }
+    };
+
+    void refreshCrime();
+    const intervalId = window.setInterval(() => {
+      void refreshCrime();
+    }, 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     const refreshHealthAlert = async () => {
       setHealthAlertLoading(true);
       try {
@@ -1057,12 +1157,15 @@ export default function Page() {
     dashboardState,
     airSnapshot,
     trafficSnapshot,
+    crimeSnapshot,
   );
   const liveContextVersion =
     activeFeature === "air-quality"
       ? airSnapshot?.timestamp ?? "air-none"
       : activeFeature === "cv-accidents"
         ? trafficSnapshot?.updatedAt ?? "traffic-none"
+        : activeFeature === "risk-workflow"
+          ? crimeSnapshot?.updatedAt ?? "crime-none"
         : "static";
   const visibleSummary =
     aiSummary ?? {
@@ -1170,7 +1273,7 @@ export default function Page() {
     }
 
     void requestAiAssistant({
-      module: buildAiModuleContext(activeFeature, dashboardState, airSnapshot, trafficSnapshot),
+      module: buildAiModuleContext(activeFeature, dashboardState, airSnapshot, trafficSnapshot, crimeSnapshot),
       mode: "summary",
     });
   }, [activeFeature, dashLoaded, dashboardState, liveContextVersion]);
@@ -1248,7 +1351,7 @@ export default function Page() {
             </h1>
             <p className="scm-hero-sub">
               Единый command center для Алматы: CH4 карта, Computer Vision ДТП,
-              воздух, risk queue, прогнозы и отчёты на одном экране.
+              воздух, безопасность, дорожные ямы и отчёты на одном экране.
             </p>
             <div className="scm-hero-pill-row">
               {FEATURES.map((feature) => (
@@ -1311,7 +1414,7 @@ export default function Page() {
               trafficSnapshot={trafficSnapshot}
             />
           )}
-          {activeFeature === "risk-workflow" && <RiskWorkflowPanel />}
+          {activeFeature === "risk-workflow" && <RiskWorkflowPanel crimeSnapshot={crimeSnapshot} />}
           {activeFeature === "forecast-center" && <ForecastCenterPanel />}
           {activeFeature === "report-studio" && <ReportStudioPanel />}
         </section>
@@ -2164,19 +2267,62 @@ function AirQualityPanel({
   );
 }
 
-// ─── Risk Workflow Panel ─────────────────────────────────────────────────────────
-function RiskWorkflowPanel() {
-  const zones = [
-    { name: "Бостандык", load: 96, trend: "Исполнение" },
-    { name: "Алатау", load: 91, trend: "Проверка" },
-    { name: "Турксиб", load: 82, trend: "Разбор" },
-    { name: "Медеу", load: 64, trend: "Наблюдение" },
-  ];
+// ─── Safety / Crime Panel ───────────────────────────────────────────────────────
+function RiskWorkflowPanel({ crimeSnapshot }: { crimeSnapshot: CrimeMonitorSnapshot | null }) {
+  const incidents = crimeSnapshot?.incidents ?? [];
+  const [selectedIncidentId, setSelectedIncidentId] = useState<number>(incidents[0]?.id ?? 0);
+
+  useEffect(() => {
+    if (!incidents.length) {
+      if (selectedIncidentId) {
+        setSelectedIncidentId(0);
+      }
+      return;
+    }
+
+    if (!incidents.some((incident) => incident.id === selectedIncidentId)) {
+      setSelectedIncidentId(incidents[0].id);
+    }
+  }, [incidents, selectedIncidentId]);
+
+  const selectedIncident =
+    incidents.find((incident) => incident.id === selectedIncidentId) ?? incidents[0] ?? null;
+  const crimeMapPoints = buildCrimeMapPoints(crimeSnapshot);
+  const criticalCount = incidents.filter((incident) => incident.severity === "critical").length;
+  const videoCount = incidents.filter((incident) => incident.hasVideo).length;
+  const districtBreakdown = Object.entries(
+    incidents.reduce<Record<string, number>>((acc, incident) => {
+      acc[incident.district] = (acc[incident.district] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .map(([district, count]) => ({ district, count }))
+    .sort((left, right) => right.count - left.count);
   const kpis = [
-    { label: "В очереди", value: "6", color: "#b289ff", help: "Сколько кейсов сейчас ждут решения в risk queue." },
-    { label: "Красных кейсов", value: "3", color: "#ff5c4d", help: "Количество самых приоритетных кейсов, которые требуют немедленной реакции." },
-    { label: "Средний SLA", value: "1.8ч", color: "#ff9f3d", help: "Среднее время, за которое кейс должен быть обработан по текущему сценарию." },
-    { label: "Отчётов готово", value: "2", color: "#47a6ff", help: "Сколько кейсов уже доведено до итогового отчёта." },
+    {
+      label: "Зон наблюдения",
+      value: String(crimeSnapshot?.coverageZones ?? 0),
+      color: "#47a6ff",
+      help: "Сколько активных камерных контуров безопасности сейчас заведено в модуль.",
+    },
+    {
+      label: "Инцидентов",
+      value: String(incidents.length),
+      color: "#ff5c4d",
+      help: "Сколько случаев драк и ссор сейчас находится в рабочем срезе.",
+    },
+    {
+      label: "С видеозаписью",
+      value: String(videoCount),
+      color: "#4ade80",
+      help: "Сколько инцидентов уже имеют доступный видеофрагмент для просмотра и фиксации.",
+    },
+    {
+      label: "Пиковое окно",
+      value: crimeSnapshot?.peakWindow ?? "нет данных",
+      color: "#b289ff",
+      help: "Интервал суток, когда вероятность конфликтов сейчас выше всего.",
+    },
   ];
 
   return (
@@ -2195,40 +2341,219 @@ function RiskWorkflowPanel() {
 
       <div className="scm-section-stack">
         <SectionHeading
-          title="Очередь по районам"
-          help="Распределение приоритетов по районам: где исполнение уже перегрето, а где кейс ещё в наблюдении."
+          title="Карта инцидентов"
+          help="На карту выведены инциденты драк и ссор по Алматы. Красная точка с видео позволяет сразу открыть подтверждённый фрагмент."
         />
-        <div className="scm-energy-grid">
-          {zones.map((z) => (
-            <div className="scm-energy-card" key={z.name}>
-              <div className="scm-energy-header">
-                <span>{z.name}</span>
-                <span className="scm-trend scm-trend-up">
-                  {z.trend}
-                </span>
-              </div>
-              <div className="scm-energy-bar-wrap">
-                <div
-                  className="scm-energy-bar"
-                  style={{
-                    width: `${z.load}%`,
-                    background: z.load > 85 ? "#ff5c4d" : z.load > 70 ? "#ff9f3d" : "#b289ff",
-                  }}
+        <SignalMap
+          points={crimeMapPoints}
+          selectedPointId={selectedIncident ? `crime-${selectedIncident.id}` : undefined}
+          onSelectPoint={(pointId) => {
+            const id = Number(pointId.replace("crime-", ""));
+            if (Number.isFinite(id)) {
+              setSelectedIncidentId(id);
+            }
+          }}
+          selectionLabel="Инцидент безопасности"
+          footerHint="Кликни по точке или по реестру справа. Инцидент с видео сразу открывает подтверждённый фрагмент камеры."
+          emptyState={{
+            title: "Контур безопасности не загружен",
+            description:
+              "Когда backend crime-модуля вернёт incidents feed, карта и видеослой появятся здесь автоматически.",
+          }}
+        />
+      </div>
+
+      <div className="scm-pothole-grid">
+        <div className="scm-pothole-photo-card scm-crime-media-card">
+          <div className="scm-title-row">
+            <h3 className="scm-reco-title">Видео и детали</h3>
+            <HelpHint text="Левый блок показывает видеофрагмент по выбранному инциденту. Если записи нет, блок честно сообщает об этом." />
+          </div>
+
+          {selectedIncident ? (
+            <>
+              {selectedIncident.hasVideo && selectedIncident.videoPath ? (
+                <video
+                  className="scm-crime-video"
+                  controls
+                  preload="metadata"
+                  src={selectedIncident.videoPath}
                 />
+              ) : (
+                <div className="scm-crime-video-placeholder">
+                  <strong>Видео пока не загружено</strong>
+                  <p>
+                    Для этого кейса запись ещё не получена. Инцидент остаётся в реестре и доступен для
+                    разбора по карте, времени и району.
+                  </p>
+                </div>
+              )}
+
+              <div className="scm-pothole-photo-copy">
+                <div className="scm-title-row">
+                  <strong>{selectedIncident.name}</strong>
+                  <span
+                    className="scm-flood-risk-badge"
+                    style={{
+                      color: getCrimeSeverityColor(selectedIncident.severity),
+                      borderColor: `${getCrimeSeverityColor(selectedIncident.severity)}44`,
+                      background: `${getCrimeSeverityColor(selectedIncident.severity)}14`,
+                    }}
+                  >
+                    {selectedIncident.severityLabel}
+                  </span>
+                </div>
+                <p>{selectedIncident.description}</p>
+                <div className="scm-pothole-meta-grid">
+                  <div className="scm-pothole-meta-card">
+                    <span>Район</span>
+                    <strong>{selectedIncident.district}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Адрес</span>
+                    <strong>{selectedIncident.address}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Участники</span>
+                    <strong>{selectedIncident.participants}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Камера</span>
+                    <strong>{selectedIncident.cameraLabel}</strong>
+                  </div>
+                </div>
               </div>
-              <strong>{z.load}%</strong>
+            </>
+          ) : null}
+        </div>
+
+        <div className="scm-pothole-side-stack">
+          <div className="scm-pothole-side-card">
+            <div className="scm-title-row">
+              <h3 className="scm-reco-title">Реестр инцидентов</h3>
+              <HelpHint text="В реестре собраны все доступные кейсы. Выбор записи синхронизирует карту и видеоблок." />
+            </div>
+            <div className="scm-pothole-list">
+              {incidents.map((incident) => (
+                <button
+                  key={incident.id}
+                  className={`scm-pothole-list-item ${selectedIncidentId === incident.id ? "scm-pothole-list-item-active" : ""}`}
+                  onClick={() => setSelectedIncidentId(incident.id)}
+                  type="button"
+                >
+                  <div
+                    className="scm-crime-list-dot"
+                    style={{ background: getCrimeSeverityColor(incident.severity) }}
+                  />
+                  <div className="scm-pothole-list-copy">
+                    <strong>{incident.name}</strong>
+                    <span>{incident.address}</span>
+                  </div>
+                  <div className="scm-crime-list-meta">
+                    {incident.hasVideo ? <span className="scm-inline-badge">Видео</span> : null}
+                    <span
+                      className="scm-flood-risk-badge"
+                      style={{
+                        color: incident.color,
+                        borderColor: `${incident.color}44`,
+                        background: `${incident.color}14`,
+                      }}
+                    >
+                      {incident.severityLabel}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="scm-pothole-side-card">
+            <div className="scm-title-row">
+              <h3 className="scm-reco-title">Патрульные экипажи</h3>
+              <HelpHint text="Статусы патрулей пришиты к safety-контурy, чтобы штаб видел, кого можно отправить на новый кейс." />
+            </div>
+            <div className="scm-patrol-list">
+              {(crimeSnapshot?.patrolUnits ?? []).map((unit) => {
+                const tone = getPatrolStatusTone(unit.status);
+                return (
+                  <div className="scm-patrol-item" key={unit.id}>
+                    <div className="scm-patrol-copy">
+                      <strong>{unit.name}</strong>
+                      <span>{unit.role}</span>
+                    </div>
+                    <span
+                      className="scm-patrol-status"
+                      style={{
+                        color: tone.color,
+                        background: tone.background,
+                        borderColor: tone.border,
+                      }}
+                    >
+                      {unit.statusLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="scm-info-grid">
+        <InfoCard
+          title="Пиковое окно"
+          desc={
+            crimeSnapshot
+              ? `${crimeSnapshot.nightRiskSharePct}% инцидентов приходятся на ${crimeSnapshot.peakWindow}.`
+              : "После загрузки snapshot здесь появится окно наибольшего риска."
+          }
+          icon="◇"
+          color="#b289ff"
+          help="Это окно помогает штабу понять, когда усиливать патрулирование и проверку камер."
+        />
+        <InfoCard
+          title="Критические кейсы"
+          desc={
+            criticalCount > 0
+              ? `${criticalCount} критический кейс уже требует немедленного разбора и подтверждения видеоматериала.`
+              : "Критических кейсов сейчас нет, но контур продолжает мониторинг камер."
+          }
+          icon="!"
+          color="#ff5c4d"
+          help="Количество самых жёстких кейсов в текущем crime-срезе."
+        />
+        <InfoCard
+          title="По районам"
+          desc={
+            districtBreakdown.length > 0
+              ? districtBreakdown.map((item) => `${item.district}: ${item.count}`).join(" · ")
+              : "Разбивка по районам появится после загрузки crime-среза."
+          }
+          icon="▣"
+          color="#47a6ff"
+          help="Распределение кейсов по районам Алматы в текущем safety-контуре."
+        />
+      </div>
+
+      <div className="scm-reco-section">
+        <div className="scm-title-row">
+          <h3 className="scm-reco-title">Что объяснит AI Assistant</h3>
+          <HelpHint text="AI rail справа не дублирует карту. Он переводит инциденты в короткую управленческую сводку по районам и действиям." />
+        </div>
+        <div className="scm-reco-list">
+          {(crimeSnapshot?.recommendations ?? []).map((recommendation, index) => (
+            <div className="scm-reco-item" key={recommendation.id}>
+              <span className="scm-reco-num">{index + 1}</span>
+              <p>
+                <strong>{recommendation.title}.</strong> {recommendation.body}
+                {typeof recommendation.priorityPct === "number"
+                  ? ` Приоритет ${recommendation.priorityPct}%.`
+                  : ""}
+              </p>
             </div>
           ))}
         </div>
       </div>
-
-      <InfoCard
-        title="Incident workflow"
-        desc="Логика модуля: сигнал → risk queue → incident → задачи → отчёт. Это отдельный самостоятельный контур для demo и презентации."
-        icon="◇"
-        color="#b289ff"
-        help="Смысл модуля не в красивом графике, а в завершённом operational workflow от сигнала до отчёта."
-      />
     </div>
   );
 }

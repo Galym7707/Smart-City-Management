@@ -131,6 +131,61 @@ export type HealthAlertSnapshot = {
   };
 };
 
+export type CrimeIncidentSeverity = "critical" | "high" | "medium";
+export type PatrolStatus = "available" | "responding" | "busy";
+
+export type CrimeIncidentSnapshot = {
+  id: number;
+  name: string;
+  type: string;
+  latitude: number;
+  longitude: number;
+  severity: CrimeIncidentSeverity;
+  severityLabel: string;
+  district: string;
+  address: string;
+  observedAt: string;
+  time: string;
+  description: string;
+  hasVideo: boolean;
+  videoPath: string | null;
+  videoMimeType: string | null;
+  color: string;
+  participants: string;
+  cameraLabel: string;
+  responseStatus: string;
+};
+
+export type CrimeRecommendationSnapshot = {
+  id: string;
+  level: "critical" | "warning" | "info";
+  title: string;
+  body: string;
+  priorityPct: number | null;
+};
+
+export type PatrolUnitSnapshot = {
+  id: string;
+  name: string;
+  role: string;
+  status: PatrolStatus;
+  statusLabel: string;
+};
+
+export type CrimeMonitorSnapshot = {
+  city: string;
+  sourceLabel: string;
+  updatedAt: string;
+  coverageZones: number;
+  weeklyDelta: number;
+  nightRiskSharePct: number;
+  peakWindow: string;
+  availableVideoIncidents: number;
+  incidents: CrimeIncidentSnapshot[];
+  patrolUnits: PatrolUnitSnapshot[];
+  recommendations: CrimeRecommendationSnapshot[];
+};
+
 async function requestJson<T>(url: string): Promise<T | null> {
   try {
     const response = await fetch(url, { cache: "no-store" });
@@ -158,4 +213,8 @@ export async function loadTrafficJamSnapshot(): Promise<TrafficJamSnapshot | nul
 
 export async function loadHealthAlertSnapshot(): Promise<HealthAlertSnapshot | null> {
   return requestJson<HealthAlertSnapshot>("/api/health-risk-alert");
+}
+
+export async function loadCrimeMonitorSnapshot(): Promise<CrimeMonitorSnapshot | null> {
+  return requestJson<CrimeMonitorSnapshot>("/api/crime-monitor");
 }

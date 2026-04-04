@@ -12,6 +12,8 @@ PipelineState = Literal["ready", "degraded", "error", "syncing"]
 PipelineSyncTrigger = Literal["manual", "scheduled"]
 EvidenceFreshness = Literal["fresh", "stale", "unavailable"]
 ScreeningLevel = Literal["low", "medium", "high"]
+CrimeSeverity = Literal["critical", "high", "medium"]
+PatrolStatus = Literal["available", "responding", "busy"]
 ActivityStage = Literal["ingest", "incident", "verification", "report"]
 ActivitySource = Literal["gee", "workflow"]
 ActivityEntityType = Literal["pipeline", "anomaly", "incident", "task", "report"]
@@ -205,3 +207,55 @@ class PipelineSyncRequest(BaseModel):
 
 class PipelineSyncResponse(BaseModel):
     status: PipelineStatus
+
+
+class CrimeIncident(BaseModel):
+    id: int
+    name: str
+    type: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    severity: CrimeSeverity
+    severity_label: str
+    district: str
+    address: str
+    observed_at: str
+    time: str
+    description: str
+    has_video: bool
+    video_path: str | None = None
+    video_mime_type: str | None = None
+    color: str
+    participants: str
+    camera_label: str
+    response_status: str
+
+
+class CrimeRecommendation(BaseModel):
+    id: str
+    level: Literal["critical", "warning", "info"]
+    title: str
+    body: str
+    priority_pct: int | None = Field(default=None, ge=0, le=100)
+
+
+class PatrolUnit(BaseModel):
+    id: str
+    name: str
+    role: str
+    status: PatrolStatus
+    status_label: str
+
+
+class CrimeMonitorSnapshot(BaseModel):
+    city: str
+    source_label: str
+    updated_at: str
+    coverage_zones: int = Field(ge=0)
+    weekly_delta: int
+    night_risk_share_pct: int = Field(ge=0, le=100)
+    peak_window: str
+    available_video_incidents: int = Field(ge=0)
+    incidents: list[CrimeIncident]
+    patrol_units: list[PatrolUnit]
+    recommendations: list[CrimeRecommendation]
