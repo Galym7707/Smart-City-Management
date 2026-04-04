@@ -2,18 +2,26 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { AnomalyMap } from "../components/anomaly-map";
+import { SignalMap, type SignalMapPoint } from "../components/signal-map";
 import {
   type DashboardHydrationState,
   createUnavailableDashboardState,
   loadDashboardState,
 } from "../lib/api";
+import type { Anomaly } from "../lib/dashboard-types";
 import {
+  type AlmatyAirMapSnapshot,
   type AlmatyAirSnapshot,
+  type HealthAlertSnapshot,
+  loadAlmatyAirMapSnapshot,
   loadAlmatyAirSnapshot,
+  loadHealthAlertSnapshot,
   loadTrafficJamSnapshot,
   type TrafficJamSnapshot,
 } from "../lib/city-signals";
+import { POTHOLES, type PotholeSeverity } from "../lib/potholes-data";
 import type {
   AiAssistantResponse,
   AiAssistantSummary,
@@ -48,7 +56,7 @@ const FEATURES: Feature[] = [
     short: "CH4",
     label: "CH4 карта",
     overview: "Спутниковый контур утечек и flare-событий.",
-    help: "Модуль показывает CH4-карту, точки отклонения от базового уровня и зоны, которые стоит проверять первыми.",
+    help: "Live screening слой CH4: отклонение от базового уровня, приоритетные точки и зоны для первичной проверки.",
     badge: "LIVE",
     color: "#4f8cff",
   },
@@ -58,7 +66,7 @@ const FEATURES: Feature[] = [
     short: "CV",
     label: "Computer Vision ДТП",
     overview: "Подключённый CV-контур трафика, пробок и детекций транспорта.",
-    help: "Сейчас модуль читает реальный output из trafficjams: jam score, плотность потока и детекции транспорта по YOLOv8.",
+    help: "Модуль читает реальный output из trafficjams: jam score, плотность потока и детекции транспорта по YOLOv8.",
     badge: "AI",
     color: "#ff8c52",
   },
@@ -68,7 +76,7 @@ const FEATURES: Feature[] = [
     short: "AQI",
     label: "Воздух Алматы",
     overview: "Live AQI Алматы, PM2.5/PM10 и health-риск для города.",
-    help: "Этот модуль читает реальный AIR API по Алматы и связывает качество воздуха с транспортной нагрузкой.",
+    help: "Модуль читает реальный AIR API по Алматы, карту станций и связывает качество воздуха с транспортной нагрузкой.",
     badge: "LIVE",
     color: "#57d18e",
   },
@@ -83,12 +91,12 @@ const FEATURES: Feature[] = [
   },
   {
     id: "forecast-center",
-    icon: "△",
-    short: "FCST",
-    label: "Прогноз города",
-    overview: "Сценарный forecast по нагрузке и рискам.",
-    help: "Forecast center показывает, где и когда нагрузка на городские сервисы выйдет из нормы и где нужен резерв.",
-    color: "#58c5ff",
+    icon: "⬣",
+    short: "ЯМЫ",
+    label: "Дорожные ямы",
+    overview: "Карта дорожных ям, фотофиксация и ремонтный приоритет по Алматы.",
+    help: "Модуль показывает зафиксированные дорожные ямы, их тяжесть, адрес и приоритет ремонта. Рекомендации и оценку бюджета выносит AI rail.",
+    color: "#ff7d5c",
   },
   {
     id: "report-studio",
@@ -124,13 +132,13 @@ const FAQ_ITEMS = [
     id: "assistant",
     question: "Что будет делать AI Assistant?",
     answer:
-      "После подключения Gemini API он станет правой точкой входа для сводок, объяснений по районам, управленческих рекомендаций и генерации коротких отчётов.",
+      "Он объясняет по районам, управленческих рекомендаций и генерации коротких отчётов.",
   },
   {
     id: "demo",
     question: "Данные на экране реальные?",
     answer:
-      "Сейчас экран смешанный: воздух подключён к live AIR API по Алматы, блок пробок читает реальный output trafficjams, остальные контуры пока остаются demo-workflow.",
+      "Воздух идёт из live AIR API по Алматы, CH4 — из live Earth Engine screening при поднятом backend, trafficjams читает реальный CV snapshot. Часть workflow-карточек остаётся операционным слоем интерфейса.",
   },
 ] as const;
 
@@ -141,15 +149,6 @@ type ChatMessage = {
   text: string;
   ts: Date;
 };
-
-const AI_MODULE_CHIPS: Array<{ label: string; featureId: FeatureId }> = [
-  { label: "CH4", featureId: "ch4-map" },
-  { label: "ДТП", featureId: "cv-accidents" },
-  { label: "Воздух", featureId: "air-quality" },
-  { label: "Риски", featureId: "risk-workflow" },
-  { label: "Прогноз", featureId: "forecast-center" },
-  { label: "Отчёт", featureId: "report-studio" },
-];
 
 const WHO_PM25_GUIDELINE = 15;
 
@@ -230,6 +229,225 @@ function formatAlmatyTime(value?: string) {
     minute: "2-digit",
     timeZone: "Asia/Almaty",
   }).format(date);
+}
+
+function formatSignedPercent(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "нет данных";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+function formatSignedPpb(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "нет данных";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)} ppb`;
+}
+
+function getPm25State(pm25: number) {
+  if (pm25 >= 55) {
+    return { label: "Очень высокий", color: "#ff5c4d" };
+  }
+  if (pm25 >= 35) {
+    return { label: "Высокий", color: "#ff9f3d" };
+  }
+  if (pm25 >= WHO_PM25_GUIDELINE) {
+    return { label: "Выше ориентира", color: "#ffd05a" };
+  }
+  return { label: "Ниже ориентира", color: "#4ade80" };
+}
+
+type TrafficMonitoringPoint = SignalMapPoint & {
+  mode: "live" | "pilot";
+};
+
+function clampTrafficScore(value: number) {
+  return Math.max(34, Math.min(99, Math.round(value)));
+}
+
+function buildTrafficMonitoringPoints(
+  trafficSnapshot: TrafficJamSnapshot | null,
+  updatedAt: string,
+): TrafficMonitoringPoint[] {
+  const jamScore = clampTrafficScore(trafficSnapshot?.jam.score ?? 76);
+  const totalCount = trafficSnapshot?.totalCount ?? 8;
+  const densityPct = Math.round((trafficSnapshot?.density ?? 0.18) * 100);
+  const liveColor = getTrafficState(jamScore).color;
+
+  return [
+    {
+      id: "traffic-west-corridor",
+      label: "Западный коридор",
+      latitude: 43.236,
+      longitude: 76.792,
+      value: `${clampTrafficScore(jamScore - 11)}% индекс пробки`,
+      category: "Приоритетное направление",
+      description: "Контроль перегруженного западного въезда.",
+      color: "#ffb45a",
+      mode: "pilot",
+      meta: [
+        { label: "Статус", value: "Плотный поток" },
+        { label: "Тип", value: "Мониторинговый слот" },
+      ],
+    },
+    {
+      id: "traffic-south-arc",
+      label: "Южная дуга",
+      latitude: 43.201,
+      longitude: 76.886,
+      value: `${clampTrafficScore(jamScore - 7)}% индекс пробки`,
+      category: "Приоритетное направление",
+      description: "Слой перегрузки по южной магистральной дуге.",
+      color: "#ff8f5c",
+      mode: "pilot",
+      meta: [
+        { label: "Статус", value: "Высокая нагрузка" },
+        { label: "Тип", value: "Мониторинговый слот" },
+      ],
+    },
+    {
+      id: "traffic-central-core",
+      label: "Центральный поток",
+      latitude: 43.247,
+      longitude: 76.928,
+      value: `${clampTrafficScore(jamScore - 5)}% индекс пробки`,
+      category: "Приоритетное направление",
+      description: "Приоритетный центр чтения перегруженной уличной сети.",
+      color: "#ff7261",
+      mode: "pilot",
+      meta: [
+        { label: "Статус", value: "Высокая нагрузка" },
+        { label: "Тип", value: "Мониторинговый слот" },
+      ],
+    },
+    {
+      id: "traffic-north-entry",
+      label: "Северный въезд",
+      latitude: 43.339,
+      longitude: 76.941,
+      value: `${clampTrafficScore(jamScore - 8)}% индекс пробки`,
+      category: "Приоритетное направление",
+      description: "Наблюдение за входящим потоком по северной дуге.",
+      color: "#ffd05a",
+      mode: "pilot",
+      meta: [
+        { label: "Статус", value: "Очередь приоритета" },
+        { label: "Тип", value: "Мониторинговый слот" },
+      ],
+    },
+    {
+      id: "traffic-southeast-ring",
+      label: "Юго-восточный контур",
+      latitude: 43.262,
+      longitude: 76.996,
+      value: `${clampTrafficScore(jamScore - 3)}% индекс пробки`,
+      category: "Приоритетное направление",
+      description: "Переходный узел для следующей камеры мониторинга.",
+      color: "#9c8bff",
+      mode: "pilot",
+      meta: [
+        { label: "Статус", value: "Высокая нагрузка" },
+        { label: "Тип", value: "Мониторинговый слот" },
+      ],
+    },
+    {
+      id: "traffic-east-live",
+      label: "Восточный видеоконтур",
+      latitude: 43.309,
+      longitude: 77.084,
+      value: `${jamScore}% индекс пробки`,
+      category: "Активный видеоконтур",
+      description: "Рабочий узел: открывает экран live-мониторинга trafficjams с видео и детекциями.",
+      color: liveColor,
+      mode: "live",
+      meta: [
+        { label: "Машин в кадре", value: String(totalCount) },
+        { label: "Плотность", value: `${densityPct}%` },
+        { label: "Обновлено", value: updatedAt },
+      ],
+    },
+  ];
+}
+
+function formatKzt(value: number) {
+  return `₸ ${value.toLocaleString("ru-RU")}`;
+}
+
+function getPotholeSeverityColor(severity: PotholeSeverity) {
+  switch (severity) {
+    case "critical":
+      return "#ef4444";
+    case "high":
+      return "#f97316";
+    case "medium":
+      return "#f59e0b";
+    default:
+      return "#10b981";
+  }
+}
+
+function getPotholeSeverityHelp(severity: PotholeSeverity) {
+  switch (severity) {
+    case "critical":
+      return "Глубокое повреждение покрытия. Нужен немедленный выезд ремонтной бригады.";
+    case "high":
+      return "Высокий риск для транспорта. Желателен ускоренный ремонт в ближайшие 48 часов.";
+    case "medium":
+      return "Повреждение уже влияет на движение, но допустимо плановое включение в ближайший график.";
+    default:
+      return "Низкая степень тяжести. Достаточно повторной проверки и планового ремонта.";
+  }
+}
+
+function getPotholeStats() {
+  const total = POTHOLES.length;
+  const critical = POTHOLES.filter((item) => item.severity === "critical").length;
+  const high = POTHOLES.filter((item) => item.severity === "high").length;
+  const districts = new Set(POTHOLES.map((item) => item.district)).size;
+  const totalCostKzt = POTHOLES.reduce((sum, item) => sum + item.costKzt, 0);
+  const topPriority = [...POTHOLES].sort((a, b) => b.priority - a.priority).slice(0, 3);
+  const districtBreakdown = Object.entries(
+    POTHOLES.reduce<Record<string, number>>((acc, item) => {
+      acc[item.district] = (acc[item.district] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .map(([district, count]) => ({ district, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    total,
+    critical,
+    high,
+    districts,
+    totalCostKzt,
+    topPriority,
+    districtBreakdown,
+  };
+}
+
+function buildPotholeMapPoints(): SignalMapPoint[] {
+  return POTHOLES.map((pothole) => ({
+    id: `pothole-${pothole.id}`,
+    label: pothole.name,
+    latitude: pothole.lat,
+    longitude: pothole.lng,
+    value: pothole.severityLabel,
+    category: pothole.district,
+    description: `${pothole.address} · ${pothole.depthLabel}`,
+    color: pothole.color,
+    meta: [
+      { label: "Адрес", value: pothole.address },
+      { label: "Глубина", value: pothole.depthLabel },
+      { label: "Дата", value: pothole.date },
+      { label: "Приоритет", value: `${pothole.priority}%` },
+    ],
+  }));
 }
 
 function buildHealthInsight(
@@ -322,11 +540,10 @@ function buildAiModuleContext(
 ): AiModuleContext {
   const feature = FEATURES.find((item) => item.id === featureId) ?? FEATURES[0];
   const leadAnomaly = dashboardState.anomalies[0];
-  const ch4Delta =
-    leadAnomaly?.methaneDeltaPct !== undefined
-      ? `+${Math.round(leadAnomaly.methaneDeltaPct)}%`
-      : "+12%";
-  const openIncidents = Object.keys(dashboardState.incidents).length || 2;
+  const ch4Delta = formatSignedPercent(leadAnomaly?.methaneDeltaPct);
+  const monitoringZones = new Set(dashboardState.anomalies.map((item) => item.region)).size;
+  const anomalyCount = dashboardState.anomalies.length;
+  const openIncidents = Object.keys(dashboardState.incidents).length;
   const airState = getAqiState(airSnapshot?.aqiAvg ?? 0);
   const trafficState = getTrafficState(trafficSnapshot?.jam.score ?? 0);
   const healthInsight = buildHealthInsight(airSnapshot, trafficSnapshot);
@@ -343,7 +560,7 @@ function buildAiModuleContext(
         metrics: [
           {
             label: "Аномалий в срезе",
-            value: String(dashboardState.anomalies.length || 4),
+            value: String(anomalyCount),
             detail: "Точки отклонения, попавшие в рабочий screening слой.",
           },
           {
@@ -353,19 +570,19 @@ function buildAiModuleContext(
           },
           {
             label: "Зон мониторинга",
-            value: "7",
-            detail: "Районы и контуры, которые сейчас находятся в спутниковом обзоре.",
+            value: String(monitoringZones || dashboardState.anomalies.length || 0),
+            detail: "Сколько регионов сейчас попало в live screening очередь.",
           },
           {
             label: "Последнее обновление",
-            value: "2 мин назад",
-            detail: "Свежесть mock-среза для демо.",
+            value: formatAlmatyTime(leadAnomaly?.detectedAt),
+            detail: "Время последней live-сцены, попавшей в очередь.",
           },
         ],
         findings: [
-          `${leadAnomaly?.verificationArea ?? "Алматы"} показывает отклонение CH4 на ${ch4Delta} к базовому профилю.`,
-          `${dashboardState.anomalies.length || 4} точек уже попали в screening-очередь и требуют проверки.`,
-          "Контур работает как intelligence layer: он показывает, где искать проблему в первую очередь.",
+          `${leadAnomaly?.verificationArea ?? leadAnomaly?.region ?? "Kazakhstan screening window"} показывает отклонение CH4 на ${ch4Delta} к базовому профилю.`,
+          `${anomalyCount} точек уже попали в screening-очередь и требуют проверки.`,
+          "Контур работает как screening and prioritization layer: он показывает, где проверять в первую очередь.",
         ],
         recommendedFocus: [
           "Подтвердить приоритетную зону и сверить спутниковый сигнал с полевыми данными.",
@@ -525,48 +742,55 @@ function buildAiModuleContext(
         ],
       };
     case "forecast-center":
+      const potholeStats = getPotholeStats();
+      const topDistricts = potholeStats.districtBreakdown.slice(0, 2).map((item) => item.district).join(" и ");
+      const topPothole = potholeStats.topPriority[0];
       return {
         featureId,
         featureLabel: feature.label,
         overview: feature.overview,
-        defaultSeverity: "Средняя",
+        defaultSeverity: potholeStats.critical > 0 ? "Высокая" : "Средняя",
         severityReasonHint:
-          "Риск ещё прогнозный, но окна перегруза уже видны и позволяют действовать заранее.",
+          potholeStats.critical > 0
+            ? `Есть ${potholeStats.critical} критические ямы, поэтому ремонтный контур уже требует приоритетного разбора.`
+            : "Критических ям нет, поэтому модуль пока в режиме приоритизации и планового ремонта.",
         metrics: [
           {
-            label: "Окон риска",
-            value: "4",
-            detail: "Временные интервалы, где нагрузка выходит из нормы.",
+            label: "Зафиксировано ям",
+            value: String(potholeStats.total),
+            detail: "Сколько дорожных дефектов сейчас в рабочей карте Алматы.",
           },
           {
-            label: "Сценариев",
-            value: "12",
-            detail: "Варианты развития ситуации в demo-модели.",
+            label: "Критических",
+            value: String(potholeStats.critical),
+            detail: "Точки, где нужен самый быстрый выезд бригады.",
           },
           {
-            label: "Резерв нужен",
-            value: "2 зоны",
-            detail: "Районы, где стоит заранее подготовить ресурс.",
+            label: "Оценка ремонта",
+            value: formatKzt(potholeStats.totalCostKzt),
+            detail: "Суммарный ориентир бюджета по текущему набору кейсов.",
           },
           {
-            label: "Точность",
-            value: "89%",
-            detail: "Качество forecast-модуля на mock-наборе.",
+            label: "Районов",
+            value: String(potholeStats.districts),
+            detail: "Сколько районов Алматы уже попало в ремонтный срез.",
           },
         ],
         findings: [
-          "Forecast center показывает, где город выйдет из нормы ещё до фактического перегруза.",
-          "Следующее напряжённое окно видно заранее, поэтому штаб может работать превентивно.",
-          "Этот контур нужен для подготовки резерва, а не для постфактум-отчёта.",
+          `В карте уже ${potholeStats.total} дорожных ям, из них ${potholeStats.critical} критические.`,
+          `Главные районы нагрузки сейчас: ${topDistricts || "Алматы в целом"}.`,
+          topPothole
+            ? `Самый приоритетный кейс: ${topPothole.address}, ${topPothole.severityLabel.toLowerCase()} тяжесть, бюджет ${topPothole.costLabel}.`
+            : "Приоритетный кейс появится после загрузки данных.",
         ],
         recommendedFocus: [
-          "Заранее перераспределить ресурс в зоны ожидаемой перегрузки.",
-          "Подготовить резервные схемы по транспорту и энергетике.",
-          "Сверять прогноз с risk queue, чтобы обновлять приоритеты до эскалации.",
+          "Отправить бригаду на самый критический адрес и закрыть опасные ямы возле плотного трафика.",
+          "Собрать недельный план ремонта по районам с наибольшим числом кейсов.",
+          "Использовать AI rail для объяснения приоритета, бюджета и очередности выездов.",
         ],
         crossModuleSignals: [
-          "Прогноз нужен, чтобы транспорт, воздух и инфраструктура не уходили в красную зону одновременно.",
-          "Он усиливает другие модули именно тем, что даёт время на реакцию.",
+          "Контур ям усиливает транспортный модуль: дефекты покрытия могут замедлять поток и ухудшать пробки.",
+          "После фиксации ямы кейс можно связывать с risk queue и отчётным слоем для ремонта и контроля бюджета.",
         ],
       };
     case "report-studio":
@@ -657,6 +881,42 @@ function getSeverityHelp(severity: AiSeverity) {
   }
 }
 
+function getTelegramAlertTone(
+  status: HealthAlertSnapshot["telegram"]["status"],
+  active: boolean,
+) {
+  switch (status) {
+    case "sent":
+      return "low";
+    case "cooldown":
+      return "medium";
+    case "failed":
+      return "critical";
+    case "not-configured":
+      return active ? "high" : "medium";
+    default:
+      return active ? "high" : "low";
+  }
+}
+
+function getTelegramAlertLabel(
+  status: HealthAlertSnapshot["telegram"]["status"],
+  active: boolean,
+) {
+  switch (status) {
+    case "sent":
+      return "Telegram отправлен";
+    case "cooldown":
+      return "Telegram защищён";
+    case "failed":
+      return "Telegram ошибка";
+    case "not-configured":
+      return "Telegram не подключен";
+    default:
+      return active ? "Alert активен" : "Наблюдение";
+  }
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 export default function Page() {
   const [activeFeature, setActiveFeature] = useState<FeatureId>("ch4-map");
@@ -670,7 +930,10 @@ export default function Page() {
   const [aiError, setAiError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [airSnapshot, setAirSnapshot] = useState<AlmatyAirSnapshot | null>(null);
+  const [airMapSnapshot, setAirMapSnapshot] = useState<AlmatyAirMapSnapshot | null>(null);
   const [trafficSnapshot, setTrafficSnapshot] = useState<TrafficJamSnapshot | null>(null);
+  const [healthAlert, setHealthAlert] = useState<HealthAlertSnapshot | null>(null);
+  const [healthAlertLoading, setHealthAlertLoading] = useState(false);
 
   const [dashboardState, setDashboardState] = useState<DashboardHydrationState>(
     createUnavailableDashboardState(),
@@ -678,23 +941,48 @@ export default function Page() {
   const [dashLoaded, setDashLoaded] = useState(false);
 
   useEffect(() => {
-    loadDashboardState()
-      .then((state) => {
-        setDashboardState(state);
-        setDashLoaded(true);
-      })
-      .catch(() => {
-        setDashLoaded(true);
-      });
+    let cancelled = false;
+
+    const refreshDashboard = async () => {
+      try {
+        const state = await loadDashboardState();
+        if (!cancelled) {
+          setDashboardState(state);
+          setDashLoaded(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setDashLoaded(true);
+        }
+      }
+    };
+
+    void refreshDashboard();
+    const intervalId = window.setInterval(() => {
+      void refreshDashboard();
+    }, 2 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     const refreshAir = async () => {
-      const snapshot = await loadAlmatyAirSnapshot();
-      if (!cancelled && snapshot) {
-        setAirSnapshot(snapshot);
+      const [snapshot, mapSnapshot] = await Promise.all([
+        loadAlmatyAirSnapshot(),
+        loadAlmatyAirMapSnapshot(),
+      ]);
+      if (!cancelled) {
+        if (snapshot) {
+          setAirSnapshot(snapshot);
+        }
+        if (mapSnapshot) {
+          setAirMapSnapshot(mapSnapshot);
+        }
       }
     };
 
@@ -731,6 +1019,34 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const refreshHealthAlert = async () => {
+      setHealthAlertLoading(true);
+      try {
+        const snapshot = await loadHealthAlertSnapshot();
+        if (!cancelled && snapshot) {
+          setHealthAlert(snapshot);
+        }
+      } finally {
+        if (!cancelled) {
+          setHealthAlertLoading(false);
+        }
+      }
+    };
+
+    void refreshHealthAlert();
+    const intervalId = window.setInterval(() => {
+      void refreshHealthAlert();
+    }, 90 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [airSnapshot?.timestamp, trafficSnapshot?.updatedAt]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
@@ -756,6 +1072,41 @@ export default function Page() {
       recommendedActions: activeModuleContext.recommendedFocus.slice(0, 3),
       crossModuleInsight: activeModuleContext.crossModuleSignals[0],
     };
+  const visibleHealthAlert = healthAlert ?? {
+    active: false,
+    severity: "Средняя" as const,
+    title: "Health-monitoring",
+    summary:
+      "Cross-signal по воздуху и пробкам ещё загружается. После ответа route здесь появится живая health-сводка по Алматы.",
+    reasoning:
+      "Сводка строится по реальным данным AIR API и trafficjams. Если оба сигнала высокие, модуль поднимет alert-режим.",
+    recommendedActions: [
+      "Дождаться загрузки свежих данных.",
+      "Сверить состояние воздуха и дорожной перегрузки.",
+      "Проверить статус Telegram-доставки после активации alert-режима.",
+    ],
+    telegramMessagePreview: "Telegram preview будет доступен после первой health-сводки.",
+    observedAt: new Date().toISOString(),
+    metrics: {
+      aqi: 0,
+      pm25: 0,
+      jamScore: 0,
+      totalCount: 0,
+      densityPct: 0,
+      airUpdatedAt: "",
+      trafficUpdatedAt: "",
+    },
+    sources: {
+      air: "",
+      traffic: "",
+    },
+    telegram: {
+      status: "not-triggered" as const,
+      targetLabel: null,
+      note: "Ожидаем первый расчёт route.",
+      sentAt: null,
+    },
+  };
 
   const requestAiAssistant = async ({
     module,
@@ -954,7 +1305,11 @@ export default function Page() {
           {activeFeature === "ch4-map" && <Ch4Panel anomalies={anomalies} />}
           {activeFeature === "cv-accidents" && <CvAccidentsPanel trafficSnapshot={trafficSnapshot} />}
           {activeFeature === "air-quality" && (
-            <AirQualityPanel airSnapshot={airSnapshot} trafficSnapshot={trafficSnapshot} />
+            <AirQualityPanel
+              airSnapshot={airSnapshot}
+              airMapSnapshot={airMapSnapshot}
+              trafficSnapshot={trafficSnapshot}
+            />
           )}
           {activeFeature === "risk-workflow" && <RiskWorkflowPanel />}
           {activeFeature === "forecast-center" && <ForecastCenterPanel />}
@@ -1065,28 +1420,92 @@ export default function Page() {
           {aiError ? <p className="scm-ai-summary-note">{aiError}</p> : null}
         </section>
 
-        <div className="scm-chatbot-chips">
-          {AI_MODULE_CHIPS.map((chip) => (
-            <button
-              key={chip.featureId}
-              className={`scm-chat-chip ${activeFeature === chip.featureId ? "scm-chat-chip-active" : ""}`}
-              onClick={() => {
-                if (chip.featureId === activeFeature) {
-                  void requestAiAssistant({
-                    module: buildAiModuleContext(chip.featureId, dashboardState, airSnapshot, trafficSnapshot),
-                    mode: "summary",
-                  });
-                  return;
-                }
+        <section className="scm-health-alert-rail">
+          <div className="scm-health-alert-head">
+            <div className="scm-ai-summary-heading">
+              <span className="scm-ai-summary-kicker">Health Alert</span>
+              <HelpHint text="Этот блок связывает реальные данные воздуха Алматы и пробок. Когда PM2.5 и дорожная перегрузка растут одновременно, модуль поднимает health-alert и готовит уведомление." />
+            </div>
+            <div className="scm-ai-summary-severity">
+              <span
+                className={`scm-ai-summary-badge scm-ai-summary-${getSeverityTone(visibleHealthAlert.severity)}`}
+              >
+                {getSeverityLabel(visibleHealthAlert.severity)}
+              </span>
+              <HelpHint text="Срочность health-alert зависит от сочетания PM2.5, AQI и индекса пробки, а не от одного показателя отдельно." />
+            </div>
+          </div>
 
-                setActiveFeature(chip.featureId);
-              }}
-              type="button"
+          <div className="scm-health-alert-title-row">
+            <strong>{visibleHealthAlert.title}</strong>
+            <span
+              className={`scm-ai-summary-badge scm-ai-summary-${getTelegramAlertTone(
+                visibleHealthAlert.telegram.status,
+                visibleHealthAlert.active,
+              )}`}
             >
-              {chip.label}
-            </button>
-          ))}
-        </div>
+              {getTelegramAlertLabel(visibleHealthAlert.telegram.status, visibleHealthAlert.active)}
+            </span>
+          </div>
+
+          <p className="scm-health-alert-summary">
+            {healthAlertLoading && !healthAlert
+              ? "Health-alert анализирует воздух и пробки..."
+              : visibleHealthAlert.summary}
+          </p>
+
+          <div className="scm-health-alert-metrics">
+            <div className="scm-health-alert-metric">
+              <span>AQI</span>
+              <strong>{visibleHealthAlert.metrics.aqi || "—"}</strong>
+            </div>
+            <div className="scm-health-alert-metric">
+              <span>PM2.5</span>
+              <strong>{visibleHealthAlert.metrics.pm25 ? `${visibleHealthAlert.metrics.pm25} µg/m³` : "—"}</strong>
+            </div>
+            <div className="scm-health-alert-metric">
+              <span>Пробка</span>
+              <strong>{visibleHealthAlert.metrics.jamScore ? `${visibleHealthAlert.metrics.jamScore}%` : "—"}</strong>
+            </div>
+            <div className="scm-health-alert-metric">
+              <span>Транспорт</span>
+              <strong>{visibleHealthAlert.metrics.totalCount || "—"}</strong>
+            </div>
+          </div>
+
+          <div className="scm-health-alert-card">
+            <div className="scm-ai-summary-label">
+              <span>Почему alert активен</span>
+              <HelpHint text="Здесь объясняется логика срабатывания alert-режима и что именно система увидела в реальных данных." />
+            </div>
+            <p>{visibleHealthAlert.reasoning}</p>
+          </div>
+
+          <div className="scm-health-alert-card">
+            <div className="scm-ai-summary-label">
+              <span>Telegram</span>
+              <HelpHint text="Статус доставки жителю. Для личного Telegram-чата нужен bot token и numeric chat_id; одного @username недостаточно." />
+            </div>
+            <p>{visibleHealthAlert.telegram.note}</p>
+            <div className="scm-health-alert-telegram-meta">
+              <span>
+                Цель: {visibleHealthAlert.telegram.targetLabel ?? "не задана"}
+              </span>
+              <span>
+                Последняя отправка: {formatAlmatyTime(visibleHealthAlert.telegram.sentAt ?? undefined)}
+              </span>
+            </div>
+          </div>
+
+          <div className="scm-ai-actions">
+            {visibleHealthAlert.recommendedActions.map((item, index) => (
+              <div className="scm-ai-action" key={`${item}-${index}-health`}>
+                <span>{index + 1}</span>
+                <p>{item}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <div className="scm-chatbot-messages">
           {chatMessages.map((msg) => (
@@ -1175,7 +1594,7 @@ function HeroGlobe({ activeFeature }: { activeFeature: FeatureId }) {
             </div>
             <HelpHint
               className="scm-globe-node-help"
-              text={`${dot.feature.short} — ${dot.feature.label}. ${dot.feature.help}`}
+              text={dot.feature.help}
             />
           </div>
         ))}
@@ -1185,38 +1604,51 @@ function HeroGlobe({ activeFeature }: { activeFeature: FeatureId }) {
 }
 
 // ─── CH4 Panel ───────────────────────────────────────────────────────────────────
-function Ch4Panel({ anomalies }: { anomalies: any[] }) {
+function Ch4Panel({ anomalies }: { anomalies: Anomaly[] }) {
   const [selected, setSelected] = useState(anomalies[0]?.id ?? "");
+  useEffect(() => {
+    if (anomalies.length === 0) {
+      if (selected) {
+        setSelected("");
+      }
+      return;
+    }
+
+    if (!anomalies.some((item) => item.id === selected)) {
+      setSelected(anomalies[0].id);
+    }
+  }, [anomalies, selected]);
+
   const leadAnomaly = anomalies.find((item) => item.id === selected) ?? anomalies[0];
-  const deltaValue =
-    leadAnomaly?.methaneDeltaPct !== undefined
-      ? `+${Math.round(leadAnomaly.methaneDeltaPct)}%`
-      : "+12%";
+  const deltaValue = formatSignedPercent(leadAnomaly?.methaneDeltaPct);
+  const uniqueRegions = new Set(anomalies.map((item) => item.region)).size;
+  const latestObservation = formatAlmatyTime(leadAnomaly?.detectedAt);
+  const leadArea = leadAnomaly?.verificationArea ?? leadAnomaly?.region ?? "Зона не определена";
 
   const kpis = [
     {
       label: "Зон мониторинга",
-      value: "7",
+      value: String(uniqueRegions || anomalies.length || 0),
       color: "#47a6ff",
-      help: "Сколько контуров или районов сейчас попадает в рабочий спутниковый срез.",
+      help: "Сколько регионов сейчас попало в live screening очередь после спутникового обновления.",
     },
     {
       label: "Аномалий",
-      value: anomalies.length > 0 ? String(anomalies.length) : "3",
+      value: String(anomalies.length),
       color: "#ff5c4d",
-      help: "Сколько точек на карте выбиваются из обычного уровня и попали в очередь на разбор.",
+      help: "Сколько live-кандидатов CH4 сейчас выбиваются из rolling baseline и попали в очередь на разбор.",
     },
     {
       label: "К базовому фону CH4",
       value: deltaValue,
       color: "#ff9f3d",
-      help: "Это не абстрактный процент. Метрика показывает, на сколько текущий уровень CH4 выше обычного фона для той же зоны и периода.",
+      help: "Это не абстрактный процент. Метрика показывает, на сколько выбранная точка CH4 выше обычного фона для той же зоны и периода.",
     },
     {
-      label: "Последнее обновление",
-      value: "2 мин назад",
+      label: "Последняя сцена",
+      value: latestObservation,
       color: "#4ade80",
-      help: "Когда платформа в последний раз пересобрала mock-срез для этой карты.",
+      help: "Время последнего live-наблюдения, на котором построен текущий screening-кандидат.",
     },
   ];
 
@@ -1252,7 +1684,10 @@ function Ch4Panel({ anomalies }: { anomalies: any[] }) {
               onPrimaryAction={() => {}}
             />
           ) : (
-            <DemoMapPlaceholder />
+            <div className="signal-map-inline-empty">
+              <strong>Live CH4-кандидаты пока не загружены</strong>
+              <p>Подними backend и выполни Earth Engine sync, чтобы карта заполнилась реальными screening-точками.</p>
+            </div>
           )}
         </div>
       </div>
@@ -1265,24 +1700,31 @@ function Ch4Panel({ anomalies }: { anomalies: any[] }) {
         <div className="scm-info-grid">
           <InfoCard
             title="Спутниковые данные"
-            desc="Sentinel-5P · TROPOMI — детектируем CH₄ с точностью до 7×7 км"
+            desc={leadAnomaly?.evidenceSource ?? "Google Earth Engine · Sentinel-5P · VIIRS thermal context"}
             icon="🛰️"
             color="#47a6ff"
-            help="Источник mock-среза для демонстрации спутникового обнаружения метана."
+            help="Источник live-screening для CH4 и теплового контекста flare-событий."
           />
           <InfoCard
-            title="Алатауский район"
-            desc="Повышенная концентрация метана +18% от базового уровня"
+            title={leadArea}
+            desc={
+              leadAnomaly
+                ? `${formatSignedPpb(leadAnomaly.methaneDeltaPpb)} и ${formatSignedPercent(leadAnomaly.methaneDeltaPct)} к базовому окну.`
+                : "Выбери screening-кандидат на карте, чтобы увидеть контекст."
+            }
             icon="⚠️"
             color="#ff5c4d"
-            help="Карточка района с приоритетом проверки: здесь текущее значение заметно выше локального фона."
+            help="Контекст выбранной зоны: насколько сильно текущая точка выше локального baseline."
           />
           <InfoCard
             title="Рекомендация"
-            desc="Направить инспекцию Газпром Казахстан для проверки сетей"
+            desc={
+              leadAnomaly?.recommendedAction ??
+              "После успешного sync здесь появится следующее действие по выбранному live-кандидату."
+            }
             icon="✅"
             color="#4ade80"
-            help="Следующее действие для штаба: кого отправить и зачем."
+            help="Следующее действие для MRV / field verification по выбранному live-кандидату."
           />
         </div>
       </div>
@@ -1292,6 +1734,7 @@ function Ch4Panel({ anomalies }: { anomalies: any[] }) {
 
 // ─── CV Accidents Panel ──────────────────────────────────────────────────────────
 function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnapshot | null }) {
+  const router = useRouter();
   const trafficState = getTrafficState(trafficSnapshot?.jam.score ?? 0);
   const updatedAt = formatAlmatyTime(trafficSnapshot?.updatedAt);
   const totalCount = trafficSnapshot?.totalCount ?? 0;
@@ -1301,6 +1744,17 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
   const detections = trafficSnapshot?.detections.slice(0, 6) ?? [];
   const frameWidth = Math.max(1440, ...detections.map((item) => item.bbox[2]));
   const frameHeight = Math.max(1080, ...detections.map((item) => item.bbox[3]));
+  const trafficMapPoints = buildTrafficMonitoringPoints(trafficSnapshot, updatedAt);
+  const liveTrafficPointId = trafficMapPoints.find((point) => point.mode === "live")?.id ?? "";
+  const [selectedTrafficPointId, setSelectedTrafficPointId] = useState(
+    trafficMapPoints.find((point) => point.mode === "pilot")?.id ?? trafficMapPoints[0]?.id ?? "",
+  );
+
+  useEffect(() => {
+    if (!trafficMapPoints.some((point) => point.id === selectedTrafficPointId)) {
+      setSelectedTrafficPointId(trafficMapPoints.find((point) => point.mode === "pilot")?.id ?? trafficMapPoints[0]?.id ?? "");
+    }
+  }, [selectedTrafficPointId, trafficMapPoints]);
 
   const stats = [
     {
@@ -1336,6 +1790,15 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
     { label: "Грузовики", value: counts.truck, detail: "Грузовой поток" },
   ];
 
+  const handleTrafficPointSelect = (pointId: string) => {
+    if (pointId === liveTrafficPointId) {
+      router.push("/traffic-live?camera=east-live");
+      return;
+    }
+
+    setSelectedTrafficPointId(pointId);
+  };
+
   return (
     <div className="scm-panel-body">
       <div className="scm-kpi-row">
@@ -1348,6 +1811,25 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
             <strong>{s.value}</strong>
           </div>
         ))}
+      </div>
+
+      <div className="scm-section-stack">
+        <SectionHeading
+          title="Карта CV-наблюдения"
+          help="Карта показывает транспортные узлы с приоритетом по перегрузке. Крайний восточный рабочий узел открывает live-видеоконтур trafficjams."
+        />
+        <SignalMap
+          points={trafficMapPoints}
+          selectedPointId={selectedTrafficPointId}
+          onSelectPoint={handleTrafficPointSelect}
+          selectionLabel="Транспортный узел"
+          footerHint="Крайний правый узел открывает live-мониторинг trafficjams. Остальные точки показывают приоритетные направления для расширения городского CV-контроля."
+          emptyState={{
+            title: "Транспортные узлы не загружены",
+            description:
+              "Как только trafficjams snapshot будет прочитан, карта перегруженных узлов появится здесь автоматически.",
+          }}
+        />
       </div>
 
       <div className="scm-section-stack">
@@ -1421,7 +1903,9 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
         />
         <InfoCard
           title="Источник"
-          desc="Данные читаются из trafficjams/traffic_data.json, который формирует YOLOv8 detector."
+          desc={
+            "Индекс пробки и детекции читаются из trafficjams/traffic_data.json, а рабочий восточный узел ведёт в live-видеоконтур trafficjams."
+          }
           icon="▣"
           color="#47a6ff"
           help="Подключённый технический источник для этого модуля."
@@ -1434,11 +1918,28 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
 // ─── Air Quality Panel ───────────────────────────────────────────────────────────
 function AirQualityPanel({
   airSnapshot,
+  airMapSnapshot,
   trafficSnapshot,
 }: {
   airSnapshot: AlmatyAirSnapshot | null;
+  airMapSnapshot: AlmatyAirMapSnapshot | null;
   trafficSnapshot: TrafficJamSnapshot | null;
 }) {
+  const [selectedStationId, setSelectedStationId] = useState("");
+
+  useEffect(() => {
+    if (!airMapSnapshot?.stations.length) {
+      if (selectedStationId) {
+        setSelectedStationId("");
+      }
+      return;
+    }
+
+    if (!airMapSnapshot.stations.some((station) => station.id === selectedStationId)) {
+      setSelectedStationId(airMapSnapshot.stations[0].id);
+    }
+  }, [airMapSnapshot, selectedStationId]);
+
   const aqiValue = Math.round(airSnapshot?.aqiAvg ?? 0);
   const pm25Value = airSnapshot?.pm25Avg ?? 0;
   const pm10Value = airSnapshot?.pm10Avg ?? 0;
@@ -1448,6 +1949,26 @@ function AirQualityPanel({
   const healthInsight = buildHealthInsight(airSnapshot, trafficSnapshot);
   const updatedAt = formatAlmatyTime(airSnapshot?.timestamp || airSnapshot?.refreshedAt);
   const pm25Multiple = pm25Value > 0 ? (pm25Value / WHO_PM25_GUIDELINE).toFixed(1) : "0.0";
+  const freshStationsCount = airMapSnapshot?.freshStationsCount ?? 0;
+  const airMapPoints: SignalMapPoint[] = (airMapSnapshot?.stations ?? []).map((station) => {
+    const pm25State = getPm25State(station.pm25);
+    return {
+      id: station.id,
+      label: station.name,
+      latitude: station.lat,
+      longitude: station.lon,
+      value: `${station.pm25.toFixed(1)} µg/m³`,
+      category: station.district ?? station.origin,
+      description: `${pm25State.label} · ${station.origin}`,
+      color: pm25State.color,
+      meta: [
+        { label: "PM2.5", value: `${station.pm25.toFixed(1)} µg/m³` },
+        { label: "Район", value: station.district ?? "не указан" },
+        { label: "Источник", value: station.origin },
+        { label: "Время", value: formatAlmatyTime(station.datetime) },
+      ],
+    };
+  });
 
   const stats = [
     {
@@ -1495,6 +2016,29 @@ function AirQualityPanel({
             <strong>{stat.value}</strong>
           </div>
         ))}
+      </div>
+
+      <div className="scm-section-stack">
+        <SectionHeading
+          title="Карта станций воздуха"
+          help="На карту выведены реальные станции AIR API со свежими измерениями PM2.5. Старые записи отфильтрованы, чтобы не смешивать архив и текущую обстановку."
+        />
+        <SignalMap
+          points={airMapPoints}
+          selectedPointId={selectedStationId}
+          onSelectPoint={setSelectedStationId}
+          selectionLabel="Станция воздуха"
+          footerHint={
+            airMapSnapshot
+              ? `На карте показаны ${freshStationsCount} свежих станций из ${airMapSnapshot.stationsTotal} записей API за окно ${airMapSnapshot.freshWindowHours} ч.`
+              : "Карта появится после получения station-level данных из AIR API."
+          }
+          emptyState={{
+            title: "Станции воздуха не загружены",
+            description:
+              "AIR API сейчас не отдал station-level слой, поэтому карта временно пуста. Как только ответ вернётся, точки появятся автоматически.",
+          }}
+        />
       </div>
 
       <div className="scm-section-stack">
@@ -1592,7 +2136,7 @@ function AirQualityPanel({
             title="Источник воздуха"
             desc={
               airSnapshot
-                ? `AIR API · ${stationsTotal} станций · ${airSnapshot.city}`
+                ? `AIR API · ${stationsTotal} станций в сводке и ${freshStationsCount} свежих точек на карте · ${airSnapshot.city}`
                 : "AIR API сейчас недоступен, поэтому live-метрики временно не показаны."
             }
             icon="◌"
@@ -1691,17 +2235,71 @@ function RiskWorkflowPanel() {
 
 // ─── Forecast Center Panel ───────────────────────────────────────────────────────
 function ForecastCenterPanel() {
-  const trucks = [
-    { id: "18:00–20:00", status: "Пик трафика", district: "Центр", fill: 86 },
-    { id: "20:00–22:00", status: "Порог по энергетике", district: "Юг", fill: 91 },
-    { id: "06:00–09:00", status: "Инверсия AQI", district: "Алатау", fill: 73 },
-    { id: "09:00–11:00", status: "Нормализация", district: "Север", fill: 42 },
+  const potholeStats = getPotholeStats();
+  const potholeMapPoints = buildPotholeMapPoints();
+  const [selectedPotholeId, setSelectedPotholeId] = useState<number>(POTHOLES[0]?.id ?? 0);
+
+  useEffect(() => {
+    if (!POTHOLES.some((item) => item.id === selectedPotholeId)) {
+      setSelectedPotholeId(POTHOLES[0]?.id ?? 0);
+    }
+  }, [selectedPotholeId]);
+
+  const selectedPothole =
+    POTHOLES.find((item) => item.id === selectedPotholeId) ??
+    POTHOLES[0] ??
+    null;
+  const latestDate = [...POTHOLES]
+    .map((item) => item.date)
+    .sort((a, b) => b.localeCompare(a))[0] ?? "нет данных";
+  const severityBreakdown = [
+    {
+      label: "Критическая",
+      count: POTHOLES.filter((item) => item.severity === "critical").length,
+      color: getPotholeSeverityColor("critical"),
+    },
+    {
+      label: "Высокая",
+      count: POTHOLES.filter((item) => item.severity === "high").length,
+      color: getPotholeSeverityColor("high"),
+    },
+    {
+      label: "Средняя",
+      count: POTHOLES.filter((item) => item.severity === "medium").length,
+      color: getPotholeSeverityColor("medium"),
+    },
+    {
+      label: "Низкая",
+      count: POTHOLES.filter((item) => item.severity === "low").length,
+      color: getPotholeSeverityColor("low"),
+    },
   ];
+  const topCases = [...POTHOLES].sort((a, b) => b.priority - a.priority);
   const kpis = [
-    { label: "Окон риска", value: "4", color: "#58c5ff", help: "Сколько временных окон система выделила как рискованные на ближайшем горизонте." },
-    { label: "Сценариев", value: "12", color: "#47a6ff", help: "Сколько вариантов развития ситуации просчитано в demo-срезе." },
-    { label: "Резерв нужен", value: "2 зоны", color: "#ff9f3d", help: "Где городу стоит заранее подготовить дополнительный ресурс." },
-    { label: "Точность", value: "89%", color: "#4ade80", help: "Оценка качества forecast-модуля на историческом mock-наборе." },
+    {
+      label: "Зон мониторинга",
+      value: String(potholeStats.total),
+      color: "#47a6ff",
+      help: "Сколько дорожных кейсов сейчас выведено в рабочий срез по Алматы.",
+    },
+    {
+      label: "Обнаружено ям",
+      value: String(potholeStats.total),
+      color: "#ff5c4d",
+      help: "Сколько дорожных дефектов уже зафиксировано в текущем наборе.",
+    },
+    {
+      label: "Критических",
+      value: String(potholeStats.critical),
+      color: "#ff9f3d",
+      help: "Ямы с самой высокой тяжестью и приоритетом выезда.",
+    },
+    {
+      label: "Последняя фиксация",
+      value: latestDate,
+      color: "#4ade80",
+      help: "Дата последнего кейса в подключённом potholes-срезе.",
+    },
   ];
 
   return (
@@ -1720,41 +2318,164 @@ function ForecastCenterPanel() {
 
       <div className="scm-section-stack">
         <SectionHeading
-          title="Окна прогноза"
-          help="Прогнозные окна показывают, когда и где город может выйти из нормы и куда нужно заранее направить ресурс."
+          title="Карта дорожных ям"
+          help="Карта показывает точки фотофиксации дорожных дефектов по Алматы. Детали по приоритету, бюджету и очередности ремонта объясняет AI rail справа."
         />
-        <div className="scm-truck-list">
-          {trucks.map((t) => (
-            <div className="scm-truck-row" key={t.id}>
-              <div className="scm-truck-id">△ {t.id}</div>
-              <div className="scm-truck-info">
-                <span>{t.district}</span>
-                <strong>{t.status}</strong>
-              </div>
-              <div className="scm-truck-fill">
-                <div className="scm-fill-bar-wrap">
-                  <div
-                    className="scm-fill-bar"
+        <SignalMap
+          points={potholeMapPoints}
+          selectedPointId={selectedPothole ? `pothole-${selectedPothole.id}` : undefined}
+          onSelectPoint={(pointId) => {
+            const id = Number(pointId.replace("pothole-", ""));
+            if (Number.isFinite(id)) {
+              setSelectedPotholeId(id);
+            }
+          }}
+          selectionLabel="Дефект покрытия"
+          footerHint="Кликни по точке на карте или по кейсу ниже. Приоритет ремонта и ориентир бюджета выдаёт AI Assistant."
+          emptyState={{
+            title: "Карта ям пока не загружена",
+            description: "После подключения potholes-feed точки дорожных дефектов появятся здесь автоматически.",
+          }}
+        />
+      </div>
+
+      <div className="scm-pothole-grid">
+        <div className="scm-pothole-photo-card">
+          <div className="scm-title-row">
+            <h3 className="scm-reco-title">Фотофиксация</h3>
+            <HelpHint text="Фото выбранного дорожного дефекта из подключённого potholes-набора." />
+          </div>
+
+          {selectedPothole ? (
+            <>
+              <img
+                alt={selectedPothole.name}
+                className="scm-pothole-photo"
+                src={selectedPothole.image}
+              />
+              <div className="scm-pothole-photo-copy">
+                <div className="scm-title-row">
+                  <strong>{selectedPothole.name}</strong>
+                  <span
+                    className="scm-flood-risk-badge"
                     style={{
-                      width: `${t.fill}%`,
-                      background: t.fill > 90 ? "#ff5c4d" : t.fill > 60 ? "#ff9f3d" : "#34d399",
+                      color: selectedPothole.color,
+                      borderColor: `${selectedPothole.color}44`,
+                      background: `${selectedPothole.color}14`,
                     }}
-                  />
+                  >
+                    {selectedPothole.severityLabel}
+                  </span>
                 </div>
-                <span>{t.fill}%</span>
+                <p>{selectedPothole.description}</p>
+                <div className="scm-pothole-meta-grid">
+                  <div className="scm-pothole-meta-card">
+                    <span>Район</span>
+                    <strong>{selectedPothole.district}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Глубина</span>
+                    <strong>{selectedPothole.depthLabel}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Адрес</span>
+                    <strong>{selectedPothole.address}</strong>
+                  </div>
+                  <div className="scm-pothole-meta-card">
+                    <span>Фиксация</span>
+                    <strong>{selectedPothole.date}</strong>
+                  </div>
+                </div>
               </div>
+            </>
+          ) : null}
+        </div>
+
+        <div className="scm-pothole-side-stack">
+          <div className="scm-pothole-side-card">
+            <div className="scm-title-row">
+              <h3 className="scm-reco-title">Кейсы по приоритету</h3>
+              <HelpHint text="Список дорожных дефектов отсортирован по приоритету ремонта." />
             </div>
-          ))}
+            <div className="scm-pothole-list">
+              {topCases.map((item) => (
+                <button
+                  key={item.id}
+                  className={`scm-pothole-list-item ${selectedPotholeId === item.id ? "scm-pothole-list-item-active" : ""}`}
+                  onClick={() => setSelectedPotholeId(item.id)}
+                  type="button"
+                >
+                  <img alt={item.name} className="scm-pothole-thumb" src={item.image} />
+                  <div className="scm-pothole-list-copy">
+                    <strong>{item.name}</strong>
+                    <span>{item.address}</span>
+                  </div>
+                  <span
+                    className="scm-flood-risk-badge"
+                    style={{
+                      color: item.color,
+                      borderColor: `${item.color}44`,
+                      background: `${item.color}14`,
+                    }}
+                  >
+                    {item.severityLabel}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="scm-pothole-side-card">
+            <div className="scm-title-row">
+              <h3 className="scm-reco-title">Разбивка по районам</h3>
+              <HelpHint text="Сколько дорожных дефектов сейчас приходится на каждый район в текущем срезе." />
+            </div>
+            <div className="scm-district-grid">
+              {potholeStats.districtBreakdown.map((item) => (
+                <div className="scm-district-card" key={item.district}>
+                  <div className="scm-district-bar-wrap">
+                    <div
+                      className="scm-district-bar"
+                      style={{
+                        width: `${(item.count / potholeStats.total) * 100}%`,
+                        background: "#ff7d5c",
+                      }}
+                    />
+                  </div>
+                  <div className="scm-district-info">
+                    <span>{item.district}</span>
+                    <strong style={{ color: "#ffb7a2" }}>{item.count}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      <InfoCard
-        title="Forecast center"
-        desc="Модуль построен как отдельный сценарный слой: где город выйдет из нормы через час и куда заранее направить ресурс."
-        icon="△"
-        color="#58c5ff"
-        help="Прогноз нужен не ради графика, а чтобы власти действовали до перегруза, а не после."
-      />
+      <div className="scm-info-grid">
+        <InfoCard
+          title="По степени тяжести"
+          desc={severityBreakdown.map((item) => `${item.label}: ${item.count}`).join(" · ")}
+          icon="⬣"
+          color="#ff7d5c"
+          help="Сводка по тяжести дорожных дефектов в текущем наборе."
+        />
+        <InfoCard
+          title="AI разбор"
+          desc="Рекомендации по выезду бригад и ориентир бюджета вынесены в AI rail справа, чтобы не засорять рабочее поле панели."
+          icon="✦"
+          color="#47a6ff"
+          help="Здесь намеренно нет отдельной колонки с рекомендациями: этот слой отдаётся AI Assistant."
+        />
+        <InfoCard
+          title="Источник potholes"
+          desc="Снимки и кейсы собраны из нового potholes-дэшборда, который пришёл с origin/master и врезан в общий smart city фронт."
+          icon="▣"
+          color="#ffd05a"
+          help="Источник этого модуля — новый дорожный контур из репозитория."
+        />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,12 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import type { TrafficDetection, TrafficJamSnapshot, TrafficVehicleCounts } from "../../../lib/city-signals";
+import type {
+  TrafficCameraLocation,
+  TrafficDetection,
+  TrafficJamSnapshot,
+  TrafficVehicleCounts,
+} from "../../../lib/city-signals";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +25,13 @@ type RawTrafficPayload = {
     score?: unknown;
   };
   timestamp?: unknown;
+};
+
+type RawTrafficCameraLocation = {
+  label?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  description?: unknown;
 };
 
 async function resolveTrafficDataPath() {
@@ -41,8 +53,31 @@ async function resolveTrafficDataPath() {
   return null;
 }
 
+async function resolveTrafficCameraPath() {
+  const candidates = [
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), "trafficjams", "camera_location.json"),
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "trafficjams", "camera_location.json"),
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "..", "trafficjams", "camera_location.json"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function toStringOrNull(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function normalizeCounts(rawCounts?: RawTrafficPayload["counts"]): TrafficVehicleCounts {
@@ -86,6 +121,35 @@ function normalizeDetections(rawDetections?: RawTrafficPayload["detections"]): T
     .filter((item): item is TrafficDetection => item !== null);
 }
 
+async function loadCameraLocation(): Promise<TrafficCameraLocation | null> {
+  const filePath = await resolveTrafficCameraPath();
+  if (!filePath) {
+    return null;
+  }
+
+  try {
+    const rawContent = await readFile(filePath, "utf-8");
+    const raw = JSON.parse(rawContent) as RawTrafficCameraLocation;
+    const label = toStringOrNull(raw.label);
+    const description = toStringOrNull(raw.description) ?? undefined;
+    const latitude = toNumber(raw.latitude, Number.NaN);
+    const longitude = toNumber(raw.longitude, Number.NaN);
+
+    if (!label || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null;
+    }
+
+    return {
+      label,
+      latitude,
+      longitude,
+      description,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   const filePath = await resolveTrafficDataPath();
   if (!filePath) {
@@ -96,9 +160,10 @@ export async function GET() {
   }
 
   try {
-    const [rawContent, fileStat] = await Promise.all([
+    const [rawContent, fileStat, cameraLocation] = await Promise.all([
       readFile(filePath, "utf-8"),
       stat(filePath),
+      loadCameraLocation(),
     ]);
     const raw = JSON.parse(rawContent) as RawTrafficPayload;
     const unixSeconds = toNumber(raw.timestamp);
@@ -113,6 +178,8 @@ export async function GET() {
         status: typeof raw.jam?.status === "string" ? raw.jam.status : "UNKNOWN",
         score: toNumber(raw.jam?.score),
       },
+      cameraLocation,
+      cameraLocationSource: cameraLocation ? "configured" : "missing",
       timestamp: unixSeconds > 0 ? new Date(unixSeconds * 1000).toISOString() : fileStat.mtime.toISOString(),
       updatedAt: fileStat.mtime.toISOString(),
       sourcePath: filePath,

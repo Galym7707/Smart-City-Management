@@ -1243,6 +1243,10 @@ export function createInitialPipelineHistory(): PipelineHistoryPayload {
 }
 
 export async function loadDashboardState(): Promise<DashboardHydrationState> {
+  if (!hasApiBaseUrl) {
+    return getDemoDashboardState();
+  }
+
   try {
     const payload = await requestJson<ApiDashboardPayload>("/api/v1/dashboard");
     return {
@@ -1250,7 +1254,7 @@ export async function loadDashboardState(): Promise<DashboardHydrationState> {
       source: "api",
     };
   } catch {
-    return getDemoDashboardState();
+    return createUnavailableDashboardState();
   }
 }
 
