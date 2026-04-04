@@ -1,0 +1,30 @@
+# OS
+Thumbs.db
+Desktop.ini
+
+# Node
+node_modules/
+.next/
+dist/
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Logs
+*.log
+.codex-*.png
+
+# Local env
+.env.local
+apps/web/.env.local
+apps/api/.env
+
+# Local build artifacts
+apps/web/out/
+test-results/
+.codex-artifacts/
+apps/api/saryna_mrv.sqlite3
