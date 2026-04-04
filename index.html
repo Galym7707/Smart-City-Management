@@ -3,20 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PotholesKZ — Мониторинг дорожных ям г. Алматы</title>
+    <title>CrimeWatch KZ — Мониторинг правонарушений г. Алматы</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" />
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg-primary: #0a0e1a;
-            --bg-secondary: #111827;
-            --bg-card: #1a2236;
-            --bg-card-hover: #1f2a42;
-            --border: #2a3550;
+            --bg-primary: #070b14;
+            --bg-secondary: #0d1117;
+            --bg-card: #161b28;
+            --bg-card-hover: #1c2333;
+            --border: #252d3d;
             --text-primary: #e2e8f0;
             --text-secondary: #94a3b8;
             --text-muted: #64748b;
@@ -27,8 +26,9 @@
             --accent-orange: #f97316;
             --accent-red: #ef4444;
             --accent-purple: #8b5cf6;
+            --accent-crimson: #dc2626;
+            --glow-red: rgba(220, 38, 38, 0.35);
             --glow-blue: rgba(59, 130, 246, 0.3);
-            --glow-red: rgba(239, 68, 68, 0.3);
         }
 
         body {
@@ -41,7 +41,7 @@
 
         /* Header */
         .header {
-            background: linear-gradient(135deg, var(--bg-secondary) 0%, #0f172a 100%);
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, #0a0f1a 100%);
             border-bottom: 1px solid var(--border);
             padding: 16px 32px;
             display: flex;
@@ -62,7 +62,7 @@
         .logo {
             width: 42px;
             height: 42px;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            background: linear-gradient(135deg, var(--accent-crimson), var(--accent-orange));
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -70,7 +70,7 @@
             font-size: 20px;
             font-weight: 800;
             color: white;
-            box-shadow: 0 4px 15px var(--glow-blue);
+            box-shadow: 0 4px 15px var(--glow-red);
         }
 
         .header-title h1 {
@@ -91,19 +91,19 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--accent-green);
+            background: rgba(220, 38, 38, 0.15);
+            color: var(--accent-crimson);
             padding: 6px 14px;
             border-radius: 20px;
             font-size: 12px;
             font-weight: 600;
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            border: 1px solid rgba(220, 38, 38, 0.3);
         }
 
         .live-dot {
             width: 8px;
             height: 8px;
-            background: var(--accent-green);
+            background: var(--accent-crimson);
             border-radius: 50%;
             animation: pulse 2s infinite;
         }
@@ -111,6 +111,11 @@
         @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        @keyframes pulseRing {
+            0% { transform: scale(1); opacity: 0.6; }
+            100% { transform: scale(2.5); opacity: 0; }
         }
 
         .header-right {
@@ -169,7 +174,7 @@
 
         .kpi-card:hover {
             background: var(--bg-card-hover);
-            border-color: var(--accent-blue);
+            border-color: var(--accent-crimson);
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
@@ -225,7 +230,7 @@
             font-size: 18px;
         }
 
-        /* Section title */
+        /* Section */
         .section-header {
             display: flex;
             align-items: center;
@@ -248,7 +253,7 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: var(--accent-blue);
+            background: var(--accent-crimson);
         }
 
         .tooltip-icon {
@@ -267,25 +272,21 @@
         /* Map */
         .map-container {
             flex: 1;
-            min-height: 400px;
+            min-height: 420px;
             border-radius: 16px;
             overflow: hidden;
             border: 1px solid var(--border);
             position: relative;
         }
 
-        #map {
-            width: 100%;
-            height: 100%;
-            min-height: 400px;
-        }
+        #map { width: 100%; height: 100%; min-height: 420px; }
 
         .map-overlay-info {
             position: absolute;
             top: 12px;
             left: 12px;
             z-index: 999;
-            background: rgba(17, 24, 39, 0.9);
+            background: rgba(13, 17, 23, 0.92);
             backdrop-filter: blur(10px);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -300,7 +301,7 @@
             bottom: 12px;
             left: 12px;
             z-index: 999;
-            background: rgba(17, 24, 39, 0.92);
+            background: rgba(13, 17, 23, 0.92);
             backdrop-filter: blur(10px);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -315,17 +316,16 @@
             color: var(--text-secondary);
             margin-bottom: 6px;
         }
-
         .legend-item:last-child { margin-bottom: 0; }
 
         .legend-circle {
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            border: 2px solid rgba(255,255,255,0.3);
+            border: 2px solid rgba(255,255,255,0.2);
         }
 
-        /* Right Panel: Dispatch */
+        /* Panel Card */
         .panel-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -342,26 +342,30 @@
             gap: 8px;
         }
 
-        /* Recommendation Card */
-        .recommendation {
-            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(249, 115, 22, 0.05));
-            border: 1px solid rgba(239, 68, 68, 0.3);
+        /* Alert Cards */
+        .alert-card {
             border-radius: 12px;
             padding: 16px;
             margin-bottom: 12px;
         }
+        .alert-card:last-child { margin-bottom: 0; }
 
-        .recommendation.warning {
+        .alert-critical {
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.12), rgba(239, 68, 68, 0.05));
+            border: 1px solid rgba(220, 38, 38, 0.3);
+        }
+
+        .alert-warning {
             background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(249, 115, 22, 0.05));
             border: 1px solid rgba(245, 158, 11, 0.3);
         }
 
-        .recommendation.ok {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.05));
-            border: 1px solid rgba(16, 185, 129, 0.3);
+        .alert-info {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(6, 182, 212, 0.05));
+            border: 1px solid rgba(59, 130, 246, 0.3);
         }
 
-        .rec-header {
+        .alert-header {
             display: flex;
             align-items: center;
             gap: 8px;
@@ -370,24 +374,43 @@
             margin-bottom: 8px;
         }
 
-        .rec-body {
+        .alert-body {
             font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.6;
         }
+        .alert-body strong { color: var(--text-primary); }
 
-        .rec-body strong {
-            color: var(--text-primary);
+        /* Priority */
+        .priority-score {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
         }
 
-        /* Pothole List */
-        .pothole-list {
+        .priority-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .priority-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1s ease;
+        }
+
+        /* Incident List */
+        .incident-list {
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
 
-        .pothole-item {
+        .incident-item {
             display: flex;
             align-items: center;
             gap: 12px;
@@ -399,34 +422,30 @@
             transition: all 0.2s ease;
         }
 
-        .pothole-item:hover {
+        .incident-item:hover {
             background: var(--bg-card-hover);
-            border-color: var(--accent-blue);
+            border-color: var(--accent-crimson);
             transform: translateX(4px);
         }
 
-        .pothole-thumb {
-            width: 52px;
-            height: 52px;
-            border-radius: 10px;
-            object-fit: cover;
-            border: 2px solid var(--border);
+        .incident-item.disabled {
+            opacity: 0.6;
         }
 
-        .pothole-info {
-            flex: 1;
+        .incident-icon {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            flex-shrink: 0;
         }
 
-        .pothole-info .name {
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .pothole-info .address {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 2px;
-        }
+        .incident-info { flex: 1; }
+        .incident-info .name { font-size: 13px; font-weight: 600; }
+        .incident-info .address { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
         .severity-badge {
             padding: 4px 10px;
@@ -435,12 +454,13 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            white-space: nowrap;
         }
 
         .severity-critical {
-            background: rgba(239, 68, 68, 0.2);
+            background: rgba(220, 38, 38, 0.2);
             color: #f87171;
-            border: 1px solid rgba(239, 68, 68, 0.3);
+            border: 1px solid rgba(220, 38, 38, 0.3);
         }
 
         .severity-high {
@@ -455,13 +475,7 @@
             border: 1px solid rgba(245, 158, 11, 0.3);
         }
 
-        .severity-low {
-            background: rgba(16, 185, 129, 0.2);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        /* Charts */
+        /* Chart */
         .chart-container {
             height: 180px;
             position: relative;
@@ -473,17 +487,16 @@
             align-items: center;
             justify-content: space-between;
             padding: 10px 0;
-            border-bottom: 1px solid rgba(42, 53, 80, 0.5);
+            border-bottom: 1px solid rgba(37, 45, 61, 0.5);
             font-size: 13px;
         }
-
         .district-row:last-child { border-bottom: none; }
 
         .district-bar-wrapper {
             flex: 1;
             margin: 0 12px;
             height: 6px;
-            background: rgba(42, 53, 80, 0.8);
+            background: rgba(37, 45, 61, 0.8);
             border-radius: 3px;
             overflow: hidden;
         }
@@ -494,30 +507,64 @@
             transition: width 1s ease;
         }
 
+        /* Patrol Units */
+        .patrol-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(37, 45, 61, 0.5);
+        }
+        .patrol-item:last-child { border-bottom: none; }
+
+        .patrol-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .patrol-info { flex: 1; }
+        .patrol-info .patrol-name { font-size: 13px; font-weight: 600; }
+        .patrol-info .patrol-role { font-size: 11px; color: var(--text-muted); }
+
+        .patrol-status {
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-available { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+        .status-responding { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); }
+        .status-busy { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+        .status-offline { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); }
+
         /* Modal */
         .modal-overlay {
             display: none;
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.85);
+            background: rgba(0, 0, 0, 0.88);
             backdrop-filter: blur(8px);
             z-index: 2000;
             justify-content: center;
             align-items: center;
         }
 
-        .modal-overlay.active {
-            display: flex;
-        }
+        .modal-overlay.active { display: flex; }
 
         .modal-content {
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 20px;
-            max-width: 750px;
-            width: 90%;
-            max-height: 90vh;
+            max-width: 800px;
+            width: 92%;
+            max-height: 92vh;
             overflow-y: auto;
             position: relative;
         }
@@ -538,28 +585,46 @@
             z-index: 10;
             transition: all 0.2s;
         }
-
         .modal-close:hover {
-            background: rgba(239, 68, 68, 0.3);
-            border-color: var(--accent-red);
+            background: rgba(220, 38, 38, 0.3);
+            border-color: var(--accent-crimson);
         }
 
-        .modal-image {
+        .modal-media {
             width: 100%;
-            max-height: 400px;
-            object-fit: cover;
             border-radius: 20px 20px 0 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px;
+            position: relative;
         }
 
-        .modal-body {
-            padding: 24px;
+        .modal-media video {
+            width: 100%;
+            max-height: 420px;
+            border-radius: 20px 20px 0 0;
+            object-fit: contain;
+            background: #000;
         }
 
-        .modal-body h2 {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 16px;
+        .no-video-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+            gap: 12px;
         }
+
+        .no-video-placeholder .icon { font-size: 48px; opacity: 0.5; }
+        .no-video-placeholder .text { font-size: 14px; text-align: center; }
+        .no-video-placeholder .subtext { font-size: 12px; color: var(--text-muted); opacity: 0.6; }
+
+        .modal-body { padding: 24px; }
+        .modal-body h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
 
         .modal-meta {
             display: grid;
@@ -590,7 +655,6 @@
         .dispatch-btn {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
             border: none;
             border-radius: 12px;
             color: white;
@@ -601,56 +665,26 @@
             letter-spacing: 0.5px;
         }
 
-        .dispatch-btn:hover {
+        .dispatch-btn.police {
+            background: linear-gradient(135deg, var(--accent-crimson), var(--accent-red));
+        }
+        .dispatch-btn.police:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px var(--glow-blue);
+            box-shadow: 0 8px 25px var(--glow-red);
         }
 
-        /* Crew Status */
-        .crew-item {
-            display: flex;
+        /* Heatmap overlay */
+        .time-badge {
+            display: inline-flex;
             align-items: center;
-            gap: 12px;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(42, 53, 80, 0.5);
-        }
-
-        .crew-item:last-child { border-bottom: none; }
-
-        .crew-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-        }
-
-        .crew-info { flex: 1; }
-        .crew-info .crew-name { font-size: 13px; font-weight: 600; }
-        .crew-info .crew-role { font-size: 11px; color: var(--text-muted); }
-
-        .crew-status {
-            padding: 4px 10px;
-            border-radius: 8px;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
             font-size: 11px;
             font-weight: 600;
-        }
-
-        .status-available {
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--accent-green);
-        }
-
-        .status-busy {
-            background: rgba(245, 158, 11, 0.15);
-            color: var(--accent-yellow);
-        }
-
-        .status-offline {
-            background: rgba(100, 116, 139, 0.15);
-            color: var(--text-muted);
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--accent-purple);
+            border: 1px solid rgba(139, 92, 246, 0.25);
         }
 
         /* Scrollbar */
@@ -659,7 +693,7 @@
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-        /* Leaflet popup customization */
+        /* Leaflet popup */
         .leaflet-popup-content-wrapper {
             background: var(--bg-card) !important;
             color: var(--text-primary) !important;
@@ -667,18 +701,16 @@
             border-radius: 12px !important;
             box-shadow: 0 10px 40px rgba(0,0,0,0.5) !important;
         }
-
         .leaflet-popup-tip {
             background: var(--bg-card) !important;
             border: 1px solid var(--border) !important;
         }
-
         .leaflet-popup-content {
             margin: 12px 16px !important;
             font-family: 'Inter', sans-serif !important;
         }
 
-        .popup-content { min-width: 200px; }
+        .popup-content { min-width: 220px; }
         .popup-content h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
         .popup-content p { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
         .popup-content .popup-btn {
@@ -686,7 +718,6 @@
             width: 100%;
             margin-top: 10px;
             padding: 8px;
-            background: var(--accent-blue);
             border: none;
             border-radius: 8px;
             color: white;
@@ -695,60 +726,32 @@
             cursor: pointer;
             text-align: center;
         }
-        .popup-content .popup-btn:hover { background: #2563eb; }
-
-        /* Responsive */
-        @media (max-width: 1200px) {
-            .main-container { grid-template-columns: 1fr; }
-            .right-panel { border-left: none; border-top: 1px solid var(--border); }
-            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        .popup-content .popup-btn.has-video {
+            background: var(--accent-crimson);
+        }
+        .popup-content .popup-btn.has-video:hover { background: #b91c1c; }
+        .popup-content .popup-btn.no-video {
+            background: var(--text-muted);
+            cursor: default;
+            opacity: 0.7;
         }
 
-        /* Priority score */
-        .priority-score {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 12px;
-        }
-
-        .priority-bar {
-            flex: 1;
-            height: 8px;
-            background: var(--bg-secondary);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .priority-fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 1s ease;
-        }
-
-        /* Freeze-thaw indicator */
-        .weather-alert {
+        /* Night indicator */
+        .night-alert {
             background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.05));
             border: 1px solid rgba(139, 92, 246, 0.3);
             border-radius: 12px;
             padding: 14px;
-            margin-bottom: 12px;
             display: flex;
             align-items: flex-start;
             gap: 10px;
         }
-
-        .weather-alert .icon { font-size: 20px; }
-        .weather-alert .text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
-        .weather-alert .text strong { color: var(--accent-purple); }
+        .night-alert .icon { font-size: 20px; }
+        .night-alert .text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+        .night-alert .text strong { color: var(--accent-purple); }
 
         /* Filter tabs */
-        .filter-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-
+        .filter-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
         .filter-tab {
             padding: 6px 14px;
             border-radius: 8px;
@@ -760,21 +763,23 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-
         .filter-tab.active, .filter-tab:hover {
-            background: var(--accent-blue);
+            background: var(--accent-crimson);
             color: white;
-            border-color: var(--accent-blue);
+            border-color: var(--accent-crimson);
         }
 
-        /* Animate numbers */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        .animate-in { animation: fadeInUp 0.5s ease forwards; }
 
-        .animate-in {
-            animation: fadeInUp 0.5s ease forwards;
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .main-container { grid-template-columns: 1fr; }
+            .right-panel { border-left: none; border-top: 1px solid var(--border); }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
 </head>
@@ -783,10 +788,10 @@
 <!-- Header -->
 <header class="header">
     <div class="header-left">
-        <div class="logo">KZ</div>
+        <div class="logo">CW</div>
         <div class="header-title">
-            <h1>PotholesKZ</h1>
-            <p>Спутниковый мониторинг дорожных ям и рекомендации для ремонтных бригад</p>
+            <h1>CrimeWatch KZ</h1>
+            <p>Мониторинг инцидентов и правонарушений · г. Алматы</p>
         </div>
         <div class="live-badge">
             <span class="live-dot"></span>
@@ -805,28 +810,28 @@
         <!-- KPI Cards -->
         <div class="kpi-grid">
             <div class="kpi-card animate-in" style="animation-delay: 0.1s">
-                <div class="label">Зон мониторинга <span class="tooltip-icon" title="Количество активных зон наблюдения">?</span></div>
-                <div class="value" style="color: var(--accent-blue)">6</div>
-                <div class="subtext">районов г. Алматы</div>
-                <div class="kpi-icon" style="background: rgba(59, 130, 246, 0.15)">📍</div>
+                <div class="label">Зон наблюдения <span class="tooltip-icon" title="Количество активных камер">?</span></div>
+                <div class="value" style="color: var(--accent-blue)">5</div>
+                <div class="subtext">камер видеонаблюдения</div>
+                <div class="kpi-icon" style="background: rgba(59, 130, 246, 0.15)">📹</div>
             </div>
             <div class="kpi-card animate-in" style="animation-delay: 0.2s">
-                <div class="label">Обнаружено ям <span class="tooltip-icon" title="Общее число зафиксированных ям">?</span></div>
-                <div class="value" style="color: var(--accent-red)">6</div>
-                <div class="trend trend-up">▲ +2 за неделю</div>
-                <div class="kpi-icon" style="background: rgba(239, 68, 68, 0.15)">🕳️</div>
+                <div class="label">Инцидентов <span class="tooltip-icon" title="Зафиксированные драки">?</span></div>
+                <div class="value" style="color: var(--accent-crimson)">5</div>
+                <div class="trend trend-up">▲ +3 за неделю</div>
+                <div class="kpi-icon" style="background: rgba(220, 38, 38, 0.15)">🚨</div>
             </div>
             <div class="kpi-card animate-in" style="animation-delay: 0.3s">
-                <div class="label">Критических <span class="tooltip-icon" title="Ямы требующие немедленного ремонта">?</span></div>
-                <div class="value" style="color: var(--accent-orange)">3</div>
-                <div class="subtext">требуют срочного выезда</div>
-                <div class="kpi-icon" style="background: rgba(249, 115, 22, 0.15)">⚠️</div>
+                <div class="label">С видеозаписью <span class="tooltip-icon" title="Инциденты с видеодоказательством">?</span></div>
+                <div class="value" style="color: var(--accent-green)">1</div>
+                <div class="subtext">видео доступно</div>
+                <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15)">🎬</div>
             </div>
             <div class="kpi-card animate-in" style="animation-delay: 0.4s">
                 <div class="label">Последнее обновление <span class="tooltip-icon" title="Время последнего сканирования">?</span></div>
-                <div class="value" style="color: var(--accent-green); font-size: 28px;">2 мин</div>
+                <div class="value" style="color: var(--accent-orange); font-size: 28px;">5 мин</div>
                 <div class="subtext">назад</div>
-                <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.15)">🔄</div>
+                <div class="kpi-icon" style="background: rgba(249, 115, 22, 0.15)">🔄</div>
             </div>
         </div>
 
@@ -834,34 +839,30 @@
         <div class="section-header">
             <div class="section-title">
                 <span class="dot"></span>
-                Карта ям г. Алматы
-                <span class="tooltip-icon" title="Интерактивная карта с расположением дорожных ям">?</span>
+                Карта инцидентов г. Алматы
+                <span class="tooltip-icon" title="Расположение зафиксированных правонарушений">?</span>
             </div>
         </div>
         <div class="map-container">
             <div id="map"></div>
             <div class="map-overlay-info">
-                <strong>Тип объекта:</strong> Дорожные ямы<br>
+                <strong>Тип:</strong> Драки / Правонарушения<br>
                 <strong>Город:</strong> Алматы<br>
-                <strong>Район:</strong> Все районы<br>
-                <small style="color: var(--text-muted); display:block; margin-top:6px;">Нажмите на маркер для просмотра деталей</small>
+                <strong>Покрытие:</strong> 5 районов<br>
+                <small style="color: var(--text-muted); display:block; margin-top:6px;">Нажмите на маркер для деталей. Красный пульсирующий — видео доступно.</small>
             </div>
             <div class="map-legend">
                 <div class="legend-item">
-                    <div class="legend-circle" style="background: var(--accent-red);"></div>
-                    Критическая (> 30 см)
+                    <div class="legend-circle" style="background: var(--accent-crimson);"></div>
+                    Драка (видео доступно)
                 </div>
                 <div class="legend-item">
                     <div class="legend-circle" style="background: var(--accent-orange);"></div>
-                    Высокая (20-30 см)
+                    Драка (без видео)
                 </div>
                 <div class="legend-item">
                     <div class="legend-circle" style="background: var(--accent-yellow);"></div>
-                    Средняя (10-20 см)
-                </div>
-                <div class="legend-item">
-                    <div class="legend-circle" style="background: var(--accent-green);"></div>
-                    Низкая (< 10 см)
+                    Подозрительная активность
                 </div>
             </div>
         </div>
@@ -874,7 +875,7 @@
 
         <!-- Weekly Trend Chart -->
         <div class="panel-card animate-in" style="animation-delay: 0.7s">
-            <div class="panel-card-title">📈 Динамика обнаружения (последние 7 дней)</div>
+            <div class="panel-card-title">📈 Динамика инцидентов (последние 7 дней)</div>
             <div class="chart-container">
                 <canvas id="trendChart"></canvas>
             </div>
@@ -883,160 +884,141 @@
 
     <!-- Right Panel -->
     <div class="right-panel">
-        <!-- Weather Alert -->
-        <div class="weather-alert">
-            <div class="icon">🌡️</div>
+        <!-- Night Alert -->
+        <div class="night-alert">
+            <div class="icon">🌙</div>
             <div class="text">
-                <strong>Внимание: Цикл заморозки-оттаивания</strong><br>
-                Ночная температура -3°C, дневная +8°C. Ожидается ускоренное разрушение дорожного покрытия в ближайшие 5 дней. Рекомендуется усиленный мониторинг.
+                <strong>Пиковые часы: 22:00 — 03:00</strong><br>
+                По статистике, 68% инцидентов происходит в ночное время. Рекомендуется усиленное патрулирование в районах с высокой концентрацией.
             </div>
         </div>
 
-        <!-- Dispatch Recommendation -->
+        <!-- Dispatch Recommendations -->
         <div class="panel-card">
-            <div class="panel-card-title">🚨 Рекомендации по диспетчеризации</div>
+            <div class="panel-card-title">🚨 Рекомендации оперативного штаба</div>
 
-            <div class="recommendation" id="mainRecommendation">
-                <div class="rec-header">
+            <div class="alert-card alert-critical">
+                <div class="alert-header">
                     <span>🔴</span>
-                    <span>СРОЧНЫЙ ВЫЕЗД ТРЕБУЕТСЯ</span>
+                    <span>СРОЧНОЕ РЕАГИРОВАНИЕ</span>
                 </div>
-                <div class="rec-body">
-                    Обнаружено <strong>3 критических ямы</strong> глубиной более 20 см.
-                    Рекомендуется направить <strong>2 ремонтные бригады</strong> в районы
-                    <strong>Алмалинский</strong> и <strong>Бостандыкский</strong>.
-                    Приоритетный маршрут рассчитан.
+                <div class="alert-body">
+                    Зафиксирован инцидент с <strong>видеозаписью</strong> в районе <strong>ул. Сейфуллина</strong>.
+                    Рекомендуется направить <strong>патрульный экипаж</strong> и оформить материал для следственных органов.
                 </div>
                 <div class="priority-score">
                     <span style="font-size: 12px; color: var(--text-muted);">Приоритет:</span>
                     <div class="priority-bar">
-                        <div class="priority-fill" style="width: 85%; background: linear-gradient(90deg, var(--accent-orange), var(--accent-red));"></div>
+                        <div class="priority-fill" style="width: 92%; background: linear-gradient(90deg, var(--accent-orange), var(--accent-crimson));"></div>
                     </div>
-                    <span style="font-size: 13px; font-weight: 700; color: var(--accent-red);">85%</span>
+                    <span style="font-size: 13px; font-weight: 700; color: var(--accent-crimson);">92%</span>
                 </div>
             </div>
 
-            <div class="recommendation warning">
-                <div class="rec-header">
+            <div class="alert-card alert-warning">
+                <div class="alert-header">
                     <span>🟡</span>
-                    <span>Плановый ремонт</span>
+                    <span>Усиленное патрулирование</span>
                 </div>
-                <div class="rec-body">
-                    <strong>2 ямы</strong> средней тяжести в <strong>Медеуском</strong> районе.
-                    Рекомендуется включить в плановый график ремонта на текущую неделю.
+                <div class="alert-body">
+                    В <strong>Алмалинском</strong> и <strong>Ауэзовском</strong> районах зафиксировано по 1 инциденту.
+                    Рекомендуется усилить патрулирование в вечернее время.
                 </div>
             </div>
 
-            <div class="recommendation ok">
-                <div class="rec-header">
-                    <span>🟢</span>
-                    <span>Мониторинг</span>
+            <div class="alert-card alert-info">
+                <div class="alert-header">
+                    <span>🔵</span>
+                    <span>Профилактика</span>
                 </div>
-                <div class="rec-body">
-                    <strong>1 яма</strong> низкой степени тяжести. Требуется повторная проверка через 7 дней.
+                <div class="alert-body">
+                    Районы <strong>Бостандыкский</strong> и <strong>Медеуский</strong> — единичные инциденты.
+                    Рекомендуется профилактический обход и проверка камер видеонаблюдения.
                 </div>
             </div>
         </div>
 
-        <!-- Crew Status -->
+        <!-- Patrol Units -->
         <div class="panel-card">
-            <div class="panel-card-title">👷 Статус ремонтных бригад</div>
-            <div class="crew-item">
-                <div class="crew-avatar" style="background: rgba(16, 185, 129, 0.15);">🚛</div>
-                <div class="crew-info">
-                    <div class="crew-name">Бригада №1</div>
-                    <div class="crew-role">Асфальтоукладка · 4 человека</div>
+            <div class="panel-card-title">🚔 Статус патрульных экипажей</div>
+            <div class="patrol-item">
+                <div class="patrol-avatar" style="background: rgba(220, 38, 38, 0.15);">🚔</div>
+                <div class="patrol-info">
+                    <div class="patrol-name">Экипаж А-17</div>
+                    <div class="patrol-role">Группа быстрого реагирования</div>
                 </div>
-                <div class="crew-status status-available">Свободна</div>
+                <div class="patrol-status status-available">Свободен</div>
             </div>
-            <div class="crew-item">
-                <div class="crew-avatar" style="background: rgba(245, 158, 11, 0.15);">🚜</div>
-                <div class="crew-info">
-                    <div class="crew-name">Бригада №2</div>
-                    <div class="crew-role">Ямочный ремонт · 3 человека</div>
+            <div class="patrol-item">
+                <div class="patrol-avatar" style="background: rgba(245, 158, 11, 0.15);">🚓</div>
+                <div class="patrol-info">
+                    <div class="patrol-name">Экипаж Б-04</div>
+                    <div class="patrol-role">Патрульная полиция</div>
                 </div>
-                <div class="crew-status status-busy">На выезде</div>
+                <div class="patrol-status status-responding">На вызове</div>
             </div>
-            <div class="crew-item">
-                <div class="crew-avatar" style="background: rgba(59, 130, 246, 0.15);">🔧</div>
-                <div class="crew-info">
-                    <div class="crew-name">Бригада №3</div>
-                    <div class="crew-role">Капитальный ремонт · 6 человек</div>
+            <div class="patrol-item">
+                <div class="patrol-avatar" style="background: rgba(16, 185, 129, 0.15);">🚔</div>
+                <div class="patrol-info">
+                    <div class="patrol-name">Экипаж В-12</div>
+                    <div class="patrol-role">Участковый патруль</div>
                 </div>
-                <div class="crew-status status-available">Свободна</div>
+                <div class="patrol-status status-available">Свободен</div>
             </div>
-            <div class="crew-item">
-                <div class="crew-avatar" style="background: rgba(100, 116, 139, 0.15);">🏗️</div>
-                <div class="crew-info">
-                    <div class="crew-name">Бригада №4</div>
-                    <div class="crew-role">Дорожная разметка · 3 человека</div>
+            <div class="patrol-item">
+                <div class="patrol-avatar" style="background: rgba(100, 116, 139, 0.15);">🏍️</div>
+                <div class="patrol-info">
+                    <div class="patrol-name">Мотогруппа М-02</div>
+                    <div class="patrol-role">Оперативный отряд</div>
                 </div>
-                <div class="crew-status status-offline">Не на смене</div>
+                <div class="patrol-status status-busy">Занят</div>
             </div>
         </div>
 
-        <!-- Pothole List -->
+        <!-- Incident List -->
         <div class="panel-card">
-            <div class="panel-card-title">🕳️ Реестр обнаруженных ям</div>
+            <div class="panel-card-title">📋 Реестр инцидентов</div>
             <div class="filter-tabs">
-                <div class="filter-tab active" onclick="filterPotholes('all')">Все</div>
-                <div class="filter-tab" onclick="filterPotholes('critical')">Критич.</div>
-                <div class="filter-tab" onclick="filterPotholes('high')">Высокая</div>
-                <div class="filter-tab" onclick="filterPotholes('medium')">Средняя</div>
+                <div class="filter-tab active" onclick="filterIncidents('all')">Все</div>
+                <div class="filter-tab" onclick="filterIncidents('video')">С видео</div>
+                <div class="filter-tab" onclick="filterIncidents('critical')">Критич.</div>
             </div>
-            <div class="pothole-list" id="potholeList"></div>
+            <div class="incident-list" id="incidentList"></div>
         </div>
 
         <!-- Severity Chart -->
         <div class="panel-card">
-            <div class="panel-card-title">🎯 Распределение по степени тяжести</div>
+            <div class="panel-card-title">🎯 Типы инцидентов</div>
             <div class="chart-container" style="height: 200px;">
-                <canvas id="severityChart"></canvas>
+                <canvas id="typeChart"></canvas>
             </div>
         </div>
 
-        <!-- Cost Estimate -->
+        <!-- Time Distribution -->
         <div class="panel-card">
-            <div class="panel-card-title">💰 Оценка стоимости ремонта</div>
-            <div class="district-row">
-                <span style="color: var(--text-secondary);">Критические (3)</span>
-                <span style="font-weight: 700; color: var(--accent-red);">₸ 450,000</span>
-            </div>
-            <div class="district-row">
-                <span style="color: var(--text-secondary);">Высокой тяжести (1)</span>
-                <span style="font-weight: 700; color: var(--accent-orange);">₸ 120,000</span>
-            </div>
-            <div class="district-row">
-                <span style="color: var(--text-secondary);">Средней тяжести (1)</span>
-                <span style="font-weight: 700; color: var(--accent-yellow);">₸ 55,000</span>
-            </div>
-            <div class="district-row">
-                <span style="color: var(--text-secondary);">Низкой тяжести (1)</span>
-                <span style="font-weight: 700; color: var(--accent-green);">₸ 15,000</span>
-            </div>
-            <div class="district-row" style="border-top: 2px solid var(--border); margin-top: 4px; padding-top: 12px;">
-                <span style="font-weight: 700;">ИТОГО</span>
-                <span style="font-weight: 800; font-size: 16px; color: var(--accent-blue);">₸ 640,000</span>
+            <div class="panel-card-title">🕐 Распределение по времени суток</div>
+            <div class="chart-container" style="height: 180px;">
+                <canvas id="timeChart"></canvas>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Photo Modal -->
-<div class="modal-overlay" id="photoModal">
+<!-- Incident Modal -->
+<div class="modal-overlay" id="incidentModal">
     <div class="modal-content">
         <button class="modal-close" onclick="closeModal()">&times;</button>
-        <img class="modal-image" id="modalImage" src="" alt="Потхоул">
+        <div class="modal-media" id="modalMedia"></div>
         <div class="modal-body">
             <h2 id="modalTitle"></h2>
             <div class="modal-meta">
                 <div class="meta-item">
-                    <div class="meta-label">Степень тяжести</div>
-                    <div class="meta-value" id="modalSeverity"></div>
+                    <div class="meta-label">Тип инцидента</div>
+                    <div class="meta-value" id="modalType"></div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Примерная глубина</div>
-                    <div class="meta-value" id="modalDepth"></div>
+                    <div class="meta-label">Степень тяжести</div>
+                    <div class="meta-value" id="modalSeverity"></div>
                 </div>
                 <div class="meta-item">
                     <div class="meta-label">Район</div>
@@ -1047,17 +1029,17 @@
                     <div class="meta-value" id="modalAddress"></div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Дата обнаружения</div>
+                    <div class="meta-label">Дата и время</div>
                     <div class="meta-value" id="modalDate"></div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Оценка ремонта</div>
-                    <div class="meta-value" id="modalCost"></div>
+                    <div class="meta-label">Видеозапись</div>
+                    <div class="meta-value" id="modalVideoStatus"></div>
                 </div>
             </div>
-            <div id="modalRecommendation" style="margin-bottom: 16px;"></div>
-            <button class="dispatch-btn" onclick="dispatchCrew()">
-                🚛 Направить ремонтную бригаду
+            <div id="modalDescription" style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; padding: 14px; background: var(--bg-secondary); border-radius: 10px;"></div>
+            <button class="dispatch-btn police" onclick="dispatchUnit()">
+                🚔 Направить патрульный экипаж
             </button>
         </div>
     </div>
@@ -1068,114 +1050,101 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
     // ==================== DATA ====================
-    const potholes = [
+    const incidents = [
         {
             id: 1,
-            name: "Яма #1 — Трасса",
-            image: "images/Pothole1.jpg",
-            lat: 43.2220,
-            lng: 76.8512,
-            severity: "medium",
-            severityLabel: "Средняя",
-            depth: "~12 см",
-            district: "Медеуский",
-            address: "пр. Аль-Фараби, 77",
-            date: "02.04.2026",
-            cost: "₸ 55,000",
-            description: "Две малые ямы на проезжей части трассы. Обнаружены при мониторинге с видеорегистратора.",
-            priority: 45,
-            color: "#f59e0b",
-            radius: 14
+            name: "Инцидент #1 — Драка у ТЦ",
+            type: "Драка",
+            lat: 43.2381,
+            lng: 76.9457,
+            severity: "critical",
+            severityLabel: "Критическая",
+            district: "Бостандыкский",
+            address: "ул. Абая / Сейфуллина",
+            date: "03.04.2026, 23:14",
+            time: "23:14",
+            description: "Массовая драка с участием 4+ человек у торгового центра. Зафиксирована камерой видеонаблюдения. Видеозапись доступна для просмотра. Пострадавшие обратились в скорую помощь.",
+            hasVideo: true,
+            videoSrc: "crime.MOV",
+            color: "#dc2626",
+            participants: "4+",
+            icon: "🎬"
         },
         {
             id: 2,
-            name: "Яма #2 — Критическая",
-            image: "images/pothhole2.png",
-            lat: 43.2565,
-            lng: 76.9286,
-            severity: "critical",
-            severityLabel: "Критическая",
-            depth: "~35 см",
+            name: "Инцидент #2 — Драка в парке",
+            type: "Драка",
+            lat: 43.2700,
+            lng: 76.9620,
+            severity: "high",
+            severityLabel: "Высокая",
             district: "Алмалинский",
-            address: "ул. Жибек Жолы, 50",
-            date: "01.04.2026",
-            cost: "₸ 180,000",
-            description: "Глубокая яма с разрушенным основанием. Угроза безопасности движения. Требуется немедленный ремонт.",
-            priority: 95,
-            color: "#ef4444",
-            radius: 22
+            address: "Парк 28 Панфиловцев",
+            date: "02.04.2026, 22:47",
+            time: "22:47",
+            description: "Конфликт между двумя группами молодых людей в парке. Очевидцы вызвали полицию. Камеры парка зафиксировали начало конфликта, но запись на сервере муниципалитета, ожидается получение.",
+            hasVideo: false,
+            videoSrc: null,
+            color: "#f97316",
+            participants: "3",
+            icon: "⚠️"
         },
         {
             id: 3,
-            name: "Яма #3 — Глубокая",
-            image: "images/pothhole3.png",
-            lat: 43.2380,
-            lng: 76.9455,
-            severity: "critical",
-            severityLabel: "Критическая",
-            depth: "~40 см",
-            district: "Бостандыкский",
-            address: "ул. Тимирязева, 28А",
-            date: "31.03.2026",
-            cost: "₸ 150,000",
-            description: "Глубокая яма с обнажённым грунтом. Опасность провала для легковых автомобилей.",
-            priority: 98,
-            color: "#ef4444",
-            radius: 24
+            name: "Инцидент #3 — Конфликт у бара",
+            type: "Драка",
+            lat: 43.2556,
+            lng: 76.8732,
+            severity: "high",
+            severityLabel: "Высокая",
+            district: "Ауэзовский",
+            address: "ул. Жандосова, 58",
+            date: "01.04.2026, 01:32",
+            time: "01:32",
+            description: "Драка у ночного заведения. Два участника, один получил лёгкие телесные повреждения. Наряд полиции прибыл через 8 минут. Видеозапись с камеры заведения запрошена.",
+            hasVideo: false,
+            videoSrc: null,
+            color: "#f97316",
+            participants: "2",
+            icon: "⚠️"
         },
         {
             id: 4,
-            name: "Яма #4 — На дороге",
-            image: "images/pothhole4.png",
-            lat: 43.2700,
-            lng: 76.8950,
-            severity: "high",
-            severityLabel: "Высокая",
-            depth: "~22 см",
-            district: "Алмалинский",
-            address: "ул. Гоголя, 111",
-            date: "02.04.2026",
-            cost: "₸ 120,000",
-            description: "Яма на проезжей части рядом с перекрёстком. Высокий трафик. Рекомендуется срочный ремонт.",
-            priority: 78,
-            color: "#f97316",
-            radius: 18
+            name: "Инцидент #4 — Драка на остановке",
+            type: "Драка",
+            lat: 43.2180,
+            lng: 76.8980,
+            severity: "medium",
+            severityLabel: "Средняя",
+            district: "Медеуский",
+            address: "пр. Достык, 105",
+            date: "31.03.2026, 19:15",
+            time: "19:15",
+            description: "Словесный конфликт, перешедший в физическое столкновение на автобусной остановке. Два участника разняты прохожими до приезда полиции. Видеозапись отсутствует.",
+            hasVideo: false,
+            videoSrc: null,
+            color: "#f59e0b",
+            participants: "2",
+            icon: "📋"
         },
         {
             id: 5,
-            name: "Яма #5 — С водой",
-            image: "images/pothhole5.png",
-            lat: 43.2100,
-            lng: 76.8780,
-            severity: "critical",
-            severityLabel: "Критическая",
-            depth: "~30 см",
-            district: "Бостандыкский",
-            address: "ул. Сатпаева, 90",
-            date: "03.04.2026",
-            cost: "₸ 120,000",
-            description: "Яма заполнена водой — реальная глубина не видна водителям. Крайне опасная ситуация.",
-            priority: 92,
-            color: "#ef4444",
-            radius: 20
-        },
-        {
-            id: 6,
-            name: "Яма #6 — Малая",
-            image: "images/pothhole6.png",
-            lat: 43.2480,
-            lng: 76.9120,
-            severity: "low",
-            severityLabel: "Низкая",
-            depth: "~7 см",
+            name: "Инцидент #5 — Драка у метро",
+            type: "Драка",
+            lat: 43.2495,
+            lng: 76.9170,
+            severity: "medium",
+            severityLabel: "Средняя",
             district: "Медеуский",
-            address: "ул. Кабанбай Батыра, 162",
-            date: "03.04.2026",
-            cost: "₸ 15,000",
-            description: "Неглубокая яма малого размера. Рекомендуется мониторинг и плановый ремонт.",
-            priority: 20,
-            color: "#10b981",
-            radius: 10
+            address: "ст. метро Абая",
+            date: "30.03.2026, 20:40",
+            time: "20:40",
+            description: "Конфликт между двумя мужчинами у входа в метро. Охрана метрополитена вмешалась. Записи камер метрополитена на запросе у управления транспорта.",
+            hasVideo: false,
+            videoSrc: null,
+            color: "#f59e0b",
+            participants: "2",
+            icon: "📋"
         }
     ];
 
@@ -1186,50 +1155,62 @@
     });
 
     // ==================== MAP ====================
-    const map = L.map('map', {
-        zoomControl: false
-    }).setView([43.2380, 76.9060], 12);
-
+    const map = L.map('map', { zoomControl: false }).setView([43.2450, 76.9200], 12);
     L.control.zoom({ position: 'topright' }).addTo(map);
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        attribution: '&copy; OSM &copy; CARTO',
         subdomains: 'abcd',
         maxZoom: 19
     }).addTo(map);
 
-    // Add pothole markers
-    potholes.forEach(p => {
-        const marker = L.circleMarker([p.lat, p.lng], {
-            radius: p.radius,
-            fillColor: p.color,
-            color: p.color,
-            weight: 2,
-            opacity: 0.9,
-            fillOpacity: 0.5,
-            className: 'pothole-marker'
-        }).addTo(map);
+    // Add incident markers
+    incidents.forEach(inc => {
+        const baseRadius = inc.severity === 'critical' ? 18 : inc.severity === 'high' ? 14 : 11;
 
-        // Animated pulsing for critical
-        if (p.severity === 'critical') {
-            const pulseMarker = L.circleMarker([p.lat, p.lng], {
-                radius: p.radius + 8,
-                fillColor: p.color,
-                color: p.color,
+        // Outer glow for video-available incident
+        if (inc.hasVideo) {
+            L.circleMarker([inc.lat, inc.lng], {
+                radius: baseRadius + 12,
+                fillColor: inc.color,
+                color: inc.color,
+                weight: 1,
+                opacity: 0.2,
+                fillOpacity: 0.08,
+            }).addTo(map);
+
+            L.circleMarker([inc.lat, inc.lng], {
+                radius: baseRadius + 6,
+                fillColor: inc.color,
+                color: inc.color,
                 weight: 1,
                 opacity: 0.3,
-                fillOpacity: 0.1,
+                fillOpacity: 0.12,
             }).addTo(map);
         }
 
+        const marker = L.circleMarker([inc.lat, inc.lng], {
+            radius: baseRadius,
+            fillColor: inc.color,
+            color: inc.color,
+            weight: 2,
+            opacity: 0.9,
+            fillOpacity: 0.55,
+        }).addTo(map);
+
+        const videoLabel = inc.hasVideo
+            ? `<button class="popup-btn has-video" onclick="openModal(${inc.id})">🎬 Смотреть видео и детали</button>`
+            : `<button class="popup-btn no-video" onclick="openModal(${inc.id})">📋 Детали инцидента (видео нет)</button>`;
+
         const popupContent = `
             <div class="popup-content">
-                <h3>${p.name}</h3>
-                <p><strong>Район:</strong> ${p.district}</p>
-                <p><strong>Адрес:</strong> ${p.address}</p>
-                <p><strong>Тяжесть:</strong> <span style="color: ${p.color}; font-weight: 700;">${p.severityLabel}</span></p>
-                <p><strong>Глубина:</strong> ${p.depth}</p>
-                <button class="popup-btn" onclick="openModal(${p.id})">📷 Смотреть фото и детали</button>
+                <h3>${inc.name}</h3>
+                <p><strong>Район:</strong> ${inc.district}</p>
+                <p><strong>Адрес:</strong> ${inc.address}</p>
+                <p><strong>Тяжесть:</strong> <span style="color: ${inc.color}; font-weight: 700;">${inc.severityLabel}</span></p>
+                <p><strong>Время:</strong> ${inc.date}</p>
+                <p><strong>Участников:</strong> ${inc.participants}</p>
+                ${videoLabel}
             </div>
         `;
 
@@ -1238,50 +1219,48 @@
 
     // ==================== MODAL ====================
     function openModal(id) {
-        const p = potholes.find(x => x.id === id);
-        if (!p) return;
+        const inc = incidents.find(x => x.id === id);
+        if (!inc) return;
 
-        document.getElementById('modalImage').src = p.image;
-        document.getElementById('modalTitle').textContent = p.name;
-        document.getElementById('modalSeverity').innerHTML = `<span class="severity-badge severity-${p.severity}">${p.severityLabel}</span>`;
-        document.getElementById('modalDepth').textContent = p.depth;
-        document.getElementById('modalDistrict').textContent = p.district;
-        document.getElementById('modalAddress').textContent = p.address;
-        document.getElementById('modalDate').textContent = p.date;
-        document.getElementById('modalCost').textContent = p.cost;
-
-        let recHtml = '';
-        if (p.severity === 'critical') {
-            recHtml = `<div class="recommendation">
-                <div class="rec-header"><span>🔴</span> <span>РЕКОМЕНДАЦИЯ: Немедленный выезд бригады</span></div>
-                <div class="rec-body">${p.description}<br><br>Рекомендуется направить бригаду капитального ремонта. Ориентировочное время работ: <strong>4-6 часов</strong>.</div>
-            </div>`;
-        } else if (p.severity === 'high') {
-            recHtml = `<div class="recommendation warning">
-                <div class="rec-header"><span>🟠</span> <span>РЕКОМЕНДАЦИЯ: Срочный ремонт</span></div>
-                <div class="rec-body">${p.description}<br><br>Включить в приоритетный план ремонта на <strong>ближайшие 48 часов</strong>.</div>
-            </div>`;
-        } else if (p.severity === 'medium') {
-            recHtml = `<div class="recommendation warning">
-                <div class="rec-header"><span>🟡</span> <span>РЕКОМЕНДАЦИЯ: Плановый ремонт</span></div>
-                <div class="rec-body">${p.description}<br><br>Включить в еженедельный план ремонта. Срок: <strong>текущая неделя</strong>.</div>
-            </div>`;
+        // Media section
+        const mediaEl = document.getElementById('modalMedia');
+        if (inc.hasVideo) {
+            mediaEl.innerHTML = `<video controls autoplay>
+                <source src="${inc.videoSrc}" type="video/mp4">
+                Ваш браузер не поддерживает воспроизведение видео.
+            </video>`;
         } else {
-            recHtml = `<div class="recommendation ok">
-                <div class="rec-header"><span>🟢</span> <span>РЕКОМЕНДАЦИЯ: Мониторинг</span></div>
-                <div class="rec-body">${p.description}<br><br>Повторная проверка через <strong>7 дней</strong>. При ухудшении — перевести в категорию «Средняя».</div>
-            </div>`;
+            mediaEl.innerHTML = `
+                <div class="no-video-placeholder">
+                    <div class="icon">📹</div>
+                    <div class="text">Видеозапись недоступна</div>
+                    <div class="subtext">Запись запрошена у соответствующих служб. Ожидание обработки.</div>
+                </div>
+            `;
         }
-        document.getElementById('modalRecommendation').innerHTML = recHtml;
 
-        document.getElementById('photoModal').classList.add('active');
+        document.getElementById('modalTitle').textContent = inc.name;
+        document.getElementById('modalType').textContent = inc.type;
+        document.getElementById('modalSeverity').innerHTML = `<span class="severity-badge severity-${inc.severity}">${inc.severityLabel}</span>`;
+        document.getElementById('modalDistrict').textContent = inc.district;
+        document.getElementById('modalAddress').textContent = inc.address;
+        document.getElementById('modalDate').textContent = inc.date;
+        document.getElementById('modalVideoStatus').innerHTML = inc.hasVideo
+            ? '<span style="color: var(--accent-green);">✅ Доступна</span>'
+            : '<span style="color: var(--text-muted);">❌ Недоступна</span>';
+        document.getElementById('modalDescription').textContent = inc.description;
+
+        document.getElementById('incidentModal').classList.add('active');
     }
 
     function closeModal() {
-        document.getElementById('photoModal').classList.remove('active');
+        const mediaEl = document.getElementById('modalMedia');
+        const video = mediaEl.querySelector('video');
+        if (video) video.pause();
+        document.getElementById('incidentModal').classList.remove('active');
     }
 
-    document.getElementById('photoModal').addEventListener('click', function(e) {
+    document.getElementById('incidentModal').addEventListener('click', function(e) {
         if (e.target === this) closeModal();
     });
 
@@ -1289,155 +1268,136 @@
         if (e.key === 'Escape') closeModal();
     });
 
-    function dispatchCrew() {
-        alert('✅ Заявка на выезд ремонтной бригады отправлена!\n\nДиспетчерская служба уведомлена.\nОжидаемое время прибытия: 30-45 минут.');
+    function dispatchUnit() {
+        alert('✅ Вызов патрульного экипажа отправлен!\n\nОперативный штаб уведомлён.\nОжидаемое время прибытия: 5-10 минут.');
         closeModal();
     }
 
-    // ==================== POTHOLE LIST ====================
-    function renderPotholeList(filter = 'all') {
-        const list = document.getElementById('potholeList');
-        const filtered = filter === 'all' ? potholes : potholes.filter(p => p.severity === filter);
+    // ==================== INCIDENT LIST ====================
+    function renderIncidentList(filter = 'all') {
+        const list = document.getElementById('incidentList');
+        let filtered = incidents;
+        if (filter === 'video') filtered = incidents.filter(i => i.hasVideo);
+        else if (filter === 'critical') filtered = incidents.filter(i => i.severity === 'critical');
 
-        // Sort by priority descending
-        const sorted = [...filtered].sort((a, b) => b.priority - a.priority);
-
-        list.innerHTML = sorted.map(p => `
-            <div class="pothole-item" onclick="openModal(${p.id})" data-severity="${p.severity}">
-                <img class="pothole-thumb" src="${p.image}" alt="${p.name}">
-                <div class="pothole-info">
-                    <div class="name">${p.name}</div>
-                    <div class="address">${p.address}</div>
+        list.innerHTML = filtered.map(inc => `
+            <div class="incident-item ${!inc.hasVideo ? '' : ''}" onclick="openModal(${inc.id})">
+                <div class="incident-icon" style="background: ${inc.hasVideo ? 'rgba(220, 38, 38, 0.15)' : 'rgba(100, 116, 139, 0.1)'}">
+                    ${inc.icon}
                 </div>
-                <span class="severity-badge severity-${p.severity}">${p.severityLabel}</span>
+                <div class="incident-info">
+                    <div class="name">${inc.name} ${inc.hasVideo ? '<span class="time-badge">🎬 Видео</span>' : ''}</div>
+                    <div class="address">${inc.address} · ${inc.date}</div>
+                </div>
+                <span class="severity-badge severity-${inc.severity}">${inc.severityLabel}</span>
             </div>
         `).join('');
     }
 
-    function filterPotholes(filter) {
+    function filterIncidents(filter) {
         document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
         event.target.classList.add('active');
-        renderPotholeList(filter);
+        renderIncidentList(filter);
     }
 
-    renderPotholeList();
+    renderIncidentList();
 
     // ==================== DISTRICT BREAKDOWN ====================
-    function renderDistrictBreakdown() {
+    (function() {
         const districts = {};
-        potholes.forEach(p => {
-            districts[p.district] = (districts[p.district] || 0) + 1;
+        incidents.forEach(i => {
+            districts[i.district] = (districts[i.district] || 0) + 1;
         });
-
         const maxCount = Math.max(...Object.values(districts));
-        const colors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
-        let i = 0;
-
+        const colors = ['#dc2626', '#f97316', '#8b5cf6', '#3b82f6', '#06b6d4'];
+        let idx = 0;
         const container = document.getElementById('districtBreakdown');
         container.innerHTML = Object.entries(districts)
             .sort((a, b) => b[1] - a[1])
             .map(([name, count]) => {
-                const color = colors[i++ % colors.length];
-                const pct = (count / maxCount) * 100;
+                const color = colors[idx++ % colors.length];
                 return `
                     <div class="district-row">
-                        <span style="min-width: 130px; color: var(--text-secondary);">${name}</span>
+                        <span style="min-width: 140px; color: var(--text-secondary);">${name}</span>
                         <div class="district-bar-wrapper">
-                            <div class="district-bar" style="width: ${pct}%; background: ${color};"></div>
+                            <div class="district-bar" style="width: ${(count / maxCount) * 100}%; background: ${color};"></div>
                         </div>
                         <span style="font-weight: 700; min-width: 30px; text-align: right;">${count}</span>
                     </div>
                 `;
             }).join('');
-    }
-
-    renderDistrictBreakdown();
+    })();
 
     // ==================== CHARTS ====================
-    // Trend Chart
-    const trendCtx = document.getElementById('trendChart').getContext('2d');
-    new Chart(trendCtx, {
+    // Trend
+    new Chart(document.getElementById('trendChart').getContext('2d'), {
         type: 'line',
         data: {
             labels: ['28.03', '29.03', '30.03', '31.03', '01.04', '02.04', '03.04'],
             datasets: [{
-                label: 'Обнаружено ям',
-                data: [2, 2, 3, 4, 5, 6, 6],
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4,
-                pointBackgroundColor: '#3b82f6',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 4,
-                pointHoverRadius: 6
+                label: 'Инциденты',
+                data: [1, 0, 1, 1, 1, 1, 1],
+                borderColor: '#dc2626',
+                backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                borderWidth: 2, fill: true, tension: 0.4,
+                pointBackgroundColor: '#dc2626', pointBorderColor: '#fff',
+                pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 6
             }, {
-                label: 'Отремонтировано',
-                data: [1, 1, 1, 2, 2, 2, 2],
+                label: 'Раскрыто',
+                data: [1, 0, 0, 1, 0, 0, 0],
                 borderColor: '#10b981',
                 backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4,
-                pointBackgroundColor: '#10b981',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 4,
-                pointHoverRadius: 6
+                borderWidth: 2, fill: true, tension: 0.4,
+                pointBackgroundColor: '#10b981', pointBorderColor: '#fff',
+                pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 6
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
-                }
-            },
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } } } },
             scales: {
-                x: {
-                    ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } },
-                    grid: { color: 'rgba(42, 53, 80, 0.5)' }
-                },
-                y: {
-                    ticks: { color: '#64748b', font: { family: 'Inter', size: 11 }, stepSize: 1 },
-                    grid: { color: 'rgba(42, 53, 80, 0.5)' }
-                }
+                x: { ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } }, grid: { color: 'rgba(37, 45, 61, 0.5)' } },
+                y: { ticks: { color: '#64748b', font: { family: 'Inter', size: 11 }, stepSize: 1 }, grid: { color: 'rgba(37, 45, 61, 0.5)' } }
             }
         }
     });
 
-    // Severity Doughnut Chart
-    const sevCtx = document.getElementById('severityChart').getContext('2d');
-    new Chart(sevCtx, {
+    // Type doughnut
+    new Chart(document.getElementById('typeChart').getContext('2d'), {
         type: 'doughnut',
         data: {
-            labels: ['Критическая', 'Высокая', 'Средняя', 'Низкая'],
+            labels: ['Массовая драка', 'Групповая драка', 'Конфликт (2 чел.)'],
             datasets: [{
-                data: [3, 1, 1, 1],
-                backgroundColor: ['#ef4444', '#f97316', '#f59e0b', '#10b981'],
-                borderColor: '#1a2236',
-                borderWidth: 3,
-                hoverOffset: 6
+                data: [1, 1, 3],
+                backgroundColor: ['#dc2626', '#f97316', '#f59e0b'],
+                borderColor: '#161b28', borderWidth: 3, hoverOffset: 6
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '65%',
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: {
-                        color: '#94a3b8',
-                        font: { family: 'Inter', size: 12 },
-                        padding: 12,
-                        usePointStyle: true,
-                        pointStyleWidth: 10
-                    }
-                }
+            responsive: true, maintainAspectRatio: false, cutout: '65%',
+            plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { family: 'Inter', size: 12 }, padding: 12, usePointStyle: true, pointStyleWidth: 10 } } }
+        }
+    });
+
+    // Time distribution
+    new Chart(document.getElementById('timeChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: ['06-12', '12-18', '18-22', '22-02', '02-06'],
+            datasets: [{
+                label: 'Инциденты',
+                data: [0, 0, 1, 3, 1],
+                backgroundColor: ['rgba(59, 130, 246, 0.3)', 'rgba(16, 185, 129, 0.3)', 'rgba(245, 158, 11, 0.5)', 'rgba(220, 38, 38, 0.6)', 'rgba(139, 92, 246, 0.4)'],
+                borderColor: ['#3b82f6', '#10b981', '#f59e0b', '#dc2626', '#8b5cf6'],
+                borderWidth: 1, borderRadius: 6
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#64748b', font: { family: 'Inter', size: 11 } }, grid: { display: false } },
+                y: { ticks: { color: '#64748b', font: { family: 'Inter', size: 11 }, stepSize: 1 }, grid: { color: 'rgba(37, 45, 61, 0.5)' } }
             }
         }
     });
