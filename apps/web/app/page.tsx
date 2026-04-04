@@ -1587,7 +1587,7 @@ export default function Page() {
           <div className="scm-health-alert-card">
             <div className="scm-ai-summary-label">
               <span>Telegram</span>
-              <HelpHint text="Статус доставки жителю. Для личного Telegram-чата нужен bot token и numeric chat_id; одного @username недостаточно." />
+              <HelpHint text="Статус доставки жителю. Для личного Telegram нужен bot token. Если chat_id не задан вручную, система попробует связать @username с private chat через getUpdates после команды /start у бота." />
             </div>
             <p>{visibleHealthAlert.telegram.note}</p>
             <div className="scm-health-alert-telegram-meta">

@@ -11,10 +11,11 @@ export const dynamic = "force-dynamic";
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim() || "";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID?.trim() || "";
 const TELEGRAM_TARGET_LABEL = process.env.TELEGRAM_TARGET_LABEL?.trim() || null;
+const TELEGRAM_TARGET_USERNAME = normalizeTelegramUsername(TELEGRAM_TARGET_LABEL);
 const ALERT_COOLDOWN_MINUTES = Number(process.env.TELEGRAM_ALERT_COOLDOWN_MINUTES ?? 120);
 const ALERT_COOLDOWN_MS =
   Number.isFinite(ALERT_COOLDOWN_MINUTES) && ALERT_COOLDOWN_MINUTES > 0
@@ -47,12 +48,54 @@ type GeminiHealthPayload = {
   telegramMessage?: unknown;
 };
 
+type HealthEvaluation = {
+  active: boolean;
+  severity: HealthAlertSeverity;
+  aqi: number;
+  pm25: number;
+  jamScore: number;
+  totalCount: number;
+  densityPct: number;
+  fingerprint: string;
+};
+
+type HealthAlertContent = {
+  title: string;
+  summary: string;
+  reasoning: string;
+  recommendedActions: string[];
+  telegramMessage: string;
+};
+
 type TelegramDelivery = {
   status: HealthAlertTelegramStatus;
   note: string;
   sentAt: string | null;
 };
 
+type TelegramUpdatesResponse = {
+  ok?: boolean;
+  result?: TelegramUpdate[];
+  description?: string;
+};
+
+type TelegramUpdate = {
+  message?: TelegramMessage;
+  edited_message?: TelegramMessage;
+};
+
+type TelegramMessage = {
+  chat?: {
+    id?: number | string;
+    type?: string;
+    username?: string;
+  };
+  from?: {
+    username?: string;
+  };
+};
+
+let resolvedTelegramChatId = TELEGRAM_CHAT_ID;
 let lastSentFingerprint = "";
 let lastSentAt = 0;
 
@@ -65,10 +108,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   if (!airSnapshot || !trafficSnapshot) {
-    return NextResponse.json(
-      { error: "Health alert inputs are unavailable." },
-      { status: 502 },
-    );
+    return NextResponse.json({ error: "Health alert inputs are unavailable." }, { status: 502 });
   }
 
   const evaluation = evaluateHealthRisk(airSnapshot, trafficSnapshot);
@@ -124,7 +164,7 @@ async function requestJson<T>(url: string): Promise<T | null> {
   }
 }
 
-function evaluateHealthRisk(airSnapshot: AlmatyAirSnapshot, trafficSnapshot: TrafficJamSnapshot) {
+function evaluateHealthRisk(airSnapshot: AlmatyAirSnapshot, trafficSnapshot: TrafficJamSnapshot): HealthEvaluation {
   const aqi = airSnapshot.aqiAvg ?? 0;
   const pm25 = airSnapshot.pm25Avg ?? 0;
   const jamScore = trafficSnapshot.jam.score ?? 0;
@@ -135,13 +175,13 @@ function evaluateHealthRisk(airSnapshot: AlmatyAirSnapshot, trafficSnapshot: Tra
   const trafficHigh = jamScore >= 65;
   const trafficCritical = jamScore >= 85;
 
-  let severity: HealthAlertSeverity = "Низкая";
-  if (airAboveWhoDaily || trafficHigh) {
-    severity = "Средняя";
-  }
-  if (airAboveWhoDaily && trafficHigh) {
+  let severity: HealthAlertSeverity = "Средняя";
+  if (!airAboveWhoDaily && !trafficHigh) {
+    severity = "Низкая";
+  } else if (airAboveWhoDaily && trafficHigh) {
     severity = "Высокая";
   }
+
   if ((airSensitiveGroups && trafficHigh) || (airAboveWhoDaily && trafficCritical) || airUnhealthy) {
     severity = "Критическая";
   }
@@ -168,8 +208,8 @@ function evaluateHealthRisk(airSnapshot: AlmatyAirSnapshot, trafficSnapshot: Tra
 async function buildHealthAlertContent(
   airSnapshot: AlmatyAirSnapshot,
   trafficSnapshot: TrafficJamSnapshot,
-  evaluation: ReturnType<typeof evaluateHealthRisk>,
-) {
+  evaluation: HealthEvaluation,
+): Promise<HealthAlertContent> {
   if (!GEMINI_API_KEY) {
     return buildFallbackHealthContent(airSnapshot, evaluation);
   }
@@ -194,7 +234,7 @@ async function buildHealthAlertContent(
         generationConfig: {
           responseMimeType: "application/json",
           responseJsonSchema: HEALTH_ALERT_SCHEMA,
-          temperature: 0.3,
+          temperature: 0.2,
         },
       }),
       cache: "no-store",
@@ -211,8 +251,11 @@ async function buildHealthAlertContent(
       throw new Error("Gemini returned empty content.");
     }
 
-    const parsed = JSON.parse(raw) as GeminiHealthPayload;
-    return normalizeGeminiHealthPayload(parsed, airSnapshot, evaluation);
+    return normalizeGeminiHealthPayload(
+      JSON.parse(raw) as GeminiHealthPayload,
+      airSnapshot,
+      evaluation,
+    );
   } catch {
     return buildFallbackHealthContent(airSnapshot, evaluation);
   }
@@ -221,17 +264,18 @@ async function buildHealthAlertContent(
 function buildGeminiPrompt(
   airSnapshot: AlmatyAirSnapshot,
   trafficSnapshot: TrafficJamSnapshot,
-  evaluation: ReturnType<typeof evaluateHealthRisk>,
+  evaluation: HealthEvaluation,
 ) {
   return [
     "Ты AI-аналитик городского штаба Алматы.",
     "Сформируй короткую health-сводку на русском языке по качеству воздуха и дорожной перегрузке.",
-    "Используй только переданные цифры.",
-    "Нельзя выдумывать районы, источники, болезни или данные.",
-    "Четко разделяй наблюдаемое и вывод: наблюдаемое — AQI, PM2.5 и индекс пробки; вывод — пробка вероятно усиливает локальную выхлопную нагрузку у магистралей.",
-    "В рекомендациях избегай медицинских диагнозов. Это управленческие и профилактические действия для акимата и жителей.",
-    "Если риск высокий или критический, упомяни, что детям, пожилым и людям с болезнями сердца/легких стоит сократить время у загруженных дорог; маски можно рекомендовать как осторожную профилактическую меру при нахождении рядом с магистралями.",
-    "Telegram message должен быть коротким, без markdown, пригодным для отправки жителю.",
+    "Используй только переданные цифры и факты.",
+    "Нельзя выдумывать районы, источники, заболевания, службы или данные.",
+    "Разделяй наблюдаемое и вывод: наблюдаемое — AQI, PM2.5, PM10 и индекс пробки; вывод — что это означает для города.",
+    "Рекомендуемые действия должны быть простыми и пригодными для акимата сегодня.",
+    "Можно советовать сократить время у магистралей и использовать маски как осторожную профилактическую меру при плохом воздухе и сильных пробках.",
+    "Не ставь диагнозы и не выдавай медицинские гарантии.",
+    "Telegram message должен быть коротким, без markdown и пригодным для отправки жителю.",
     `Контекст: ${JSON.stringify({
       city: airSnapshot.city,
       air: {
@@ -268,8 +312,8 @@ function extractGeminiText(payload: any) {
 function normalizeGeminiHealthPayload(
   parsed: GeminiHealthPayload,
   airSnapshot: AlmatyAirSnapshot,
-  evaluation: ReturnType<typeof evaluateHealthRisk>,
-) {
+  evaluation: HealthEvaluation,
+): HealthAlertContent {
   const fallback = buildFallbackHealthContent(airSnapshot, evaluation);
   const recommendedActions = Array.isArray(parsed.recommendedActions)
     ? parsed.recommendedActions.filter(
@@ -278,61 +322,50 @@ function normalizeGeminiHealthPayload(
     : [];
 
   return {
-    title:
-      typeof parsed.title === "string" && parsed.title.trim().length > 0
-        ? parsed.title.trim()
-        : fallback.title,
-    summary:
-      typeof parsed.summary === "string" && parsed.summary.trim().length > 0
-        ? parsed.summary.trim()
-        : fallback.summary,
-    reasoning:
-      typeof parsed.reasoning === "string" && parsed.reasoning.trim().length > 0
-        ? parsed.reasoning.trim()
-        : fallback.reasoning,
-    recommendedActions:
-      recommendedActions.length === 3 ? recommendedActions : fallback.recommendedActions,
-    telegramMessage:
-      typeof parsed.telegramMessage === "string" && parsed.telegramMessage.trim().length > 0
-        ? parsed.telegramMessage.trim()
-        : fallback.telegramMessage,
+    title: normalizeText(parsed.title, fallback.title),
+    summary: normalizeText(parsed.summary, fallback.summary),
+    reasoning: normalizeText(parsed.reasoning, fallback.reasoning),
+    recommendedActions: recommendedActions.length === 3 ? recommendedActions : fallback.recommendedActions,
+    telegramMessage: normalizeText(parsed.telegramMessage, fallback.telegramMessage),
   };
 }
 
 function buildFallbackHealthContent(
   airSnapshot: AlmatyAirSnapshot,
-  evaluation: ReturnType<typeof evaluateHealthRisk>,
-) {
+  evaluation: HealthEvaluation,
+): HealthAlertContent {
   const pm25Text = `${round1(evaluation.pm25)} µg/m³`;
-  const aqiText = `${round1(evaluation.aqi)}`;
+  const aqiText = String(round1(evaluation.aqi));
   const jamText = `${round1(evaluation.jamScore)}%`;
 
   const summary = evaluation.active
-    ? `В Алматы одновременно фиксируются повышенный PM2.5 (${pm25Text}) и сильная дорожная перегрузка (${jamText}). Это повышает вероятность дополнительной выхлопной нагрузки у загруженных магистралей и увеличивает риск для чувствительных групп.`
-    : `Сейчас cross-signal по здоровью в Алматы под наблюдением: AQI ${aqiText}, PM2.5 ${pm25Text}, индекс пробки ${jamText}. Для автоматической эскалации нужны одновременно более грязный воздух и сильная перегрузка дорог.`;
+    ? `В Алматы одновременно фиксируются повышенный PM2.5 (${pm25Text}) и сильная дорожная перегрузка (${jamText}). Это повышает выхлопную нагрузку рядом с загруженными магистралями и усиливает риск для чувствительных групп населения.`
+    : `Сейчас health-alert по Алматы остаётся в режиме наблюдения: AQI ${aqiText}, PM2.5 ${pm25Text}, индекс пробки ${jamText}. Для автоматической эскалации нужны одновременно грязный воздух и сильная дорожная перегрузка.`;
 
   const reasoning = evaluation.active
-    ? `PM2.5 выше ориентира ВОЗ 15 µg/m³ для 24-часового окна, а индекс пробки указывает на сильную дорожную перегрузку. Для детей, пожилых и людей с болезнями сердца/легких это означает повышенный риск рядом с загруженными дорогами.`
-    : `Система пока не переводит состояние в health-alert: один из двух триггеров недостаточно выражен. Логика смотрит на сочетание PM2.5 и дорожной перегрузки, а не на один сигнал в отрыве от другого.`;
+    ? `PM2.5 выше ориентира ВОЗ 15 µg/m³ для 24-часового окна, а индекс пробки указывает на сильную дорожную перегрузку. Для детей, пожилых и людей с болезнями сердца или лёгких это означает повышенный риск рядом с загруженными дорогами.`
+    : `Система не поднимает alert, потому что одно из двух условий недостаточно выражено. Логика смотрит именно на сочетание воздуха и пробок, а не на один сигнал в отрыве от другого.`;
 
   const recommendedActions = evaluation.active
     ? [
-        "Оповестить жителей о повышенной выхлопной нагрузке возле загруженных магистралей и сократить время у дорог.",
-        "Для детей, пожилых и людей с болезнями сердца или легких рекомендовать маски и ограничение длительного пребывания у магистралей.",
-        "Дать приоритет разгрузке проблемного участка: перенастроить светофоры, перераспределить поток или ограничить транзит.",
+        "Предупредить жителей о повышенной выхлопной нагрузке возле загруженных магистралей и сократить время у дорог.",
+        "Рекомендовать детям, пожилым и людям с болезнями сердца или лёгких ограничить длительное пребывание у магистралей; при необходимости использовать маски.",
+        "Разгрузить самый перегруженный транспортный участок через управление светофорами, перераспределение потока или ограничение транзита.",
       ]
     : [
         "Продолжать мониторинг AQI, PM2.5 и индекса пробки без срочной эскалации.",
         "Держать готовым шаблон уведомления для чувствительных групп на случай ухудшения воздуха и роста пробок.",
-        "Следить за транспортным узлом с максимальной перегрузкой и обновлять сводку после следующего snapshot.",
+        "Следить за самым перегруженным транспортным узлом и обновить сводку после следующего snapshot.",
       ];
 
   const telegramMessage = evaluation.active
-    ? `Алматы: зафиксированы повышенный PM2.5 (${pm25Text}) и сильная пробка (${jamText}). Возле загруженных дорог растет выхлопная нагрузка. Детям, пожилым и людям с болезнями сердца/легких лучше сократить время у магистралей; при необходимости используйте маски.`
+    ? `Алматы: фиксируются повышенный PM2.5 (${pm25Text}) и сильная пробка (${jamText}). Возле загруженных дорог растёт выхлопная нагрузка. Детям, пожилым и людям с болезнями сердца или лёгких лучше сократить время у магистралей; при необходимости используйте маски.`
     : `Алматы: health-alert пока не активирован. AQI ${aqiText}, PM2.5 ${pm25Text}, индекс пробки ${jamText}. Система продолжает наблюдение.`;
 
   return {
-    title: evaluation.active ? "Пробка и грязный воздух усиливают health-risk" : `Health-monitoring: ${airSnapshot.city}`,
+    title: evaluation.active
+      ? "Пробки и грязный воздух усиливают health-risk"
+      : `Health-monitoring: ${airSnapshot.city}`,
     summary,
     reasoning,
     recommendedActions,
@@ -342,20 +375,30 @@ function buildFallbackHealthContent(
 
 async function maybeSendTelegramAlert(
   message: string,
-  evaluation: ReturnType<typeof evaluateHealthRisk>,
+  evaluation: HealthEvaluation,
 ): Promise<TelegramDelivery> {
   if (!evaluation.active) {
     return {
       status: "not-triggered",
-      note: "Telegram-уведомление не отправлялось: cross-signal по воздуху и пробкам пока не достиг alert-режима.",
+      note: "Telegram не отправлялся: одновременно высокий PM2.5 и сильная пробка сейчас не дали alert-режим.",
       sentAt: null,
     };
   }
 
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+  if (!TELEGRAM_BOT_TOKEN) {
     return {
       status: "not-configured",
-      note: "Telegram не подключен: для личного чата нужен bot token и numeric chat_id. Одного @username для личной доставки недостаточно.",
+      note: "Telegram не подключен: в .env.local отсутствует TELEGRAM_BOT_TOKEN.",
+      sentAt: null,
+    };
+  }
+
+  const resolvedChatId = await resolveTelegramChatId();
+  if (!resolvedChatId) {
+    return {
+      status: "not-configured",
+      note:
+        "Telegram не подключен до конца: нужен numeric chat_id или bot token с доступным getUpdates. Если цель — личный Telegram, открой бота и нажми /start, тогда username можно будет связать с chat_id автоматически.",
       sentAt: null,
     };
   }
@@ -364,7 +407,7 @@ async function maybeSendTelegramAlert(
   if (lastSentFingerprint === evaluation.fingerprint && now - lastSentAt < ALERT_COOLDOWN_MS) {
     return {
       status: "cooldown",
-      note: "Telegram-уведомление уже отправлялось по этому состоянию; повтор подавлен cooldown-защитой.",
+      note: "Telegram уже отправлялся по этому состоянию; повтор подавлен cooldown-защитой.",
       sentAt: new Date(lastSentAt).toISOString(),
     };
   }
@@ -376,7 +419,7 @@ async function maybeSendTelegramAlert(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: resolvedChatId,
         text: message,
       }),
       cache: "no-store",
@@ -393,16 +436,86 @@ async function maybeSendTelegramAlert(
 
     return {
       status: "sent",
-      note: "Telegram-уведомление отправлено по активному health-alert состоянию.",
+      note: TELEGRAM_CHAT_ID
+        ? "Telegram-уведомление отправлено по активному health-alert состоянию."
+        : `Telegram-уведомление отправлено после автоматического определения chat_id для ${TELEGRAM_TARGET_LABEL ?? "целевого пользователя"}.`,
       sentAt: new Date(now).toISOString(),
     };
   } catch {
     return {
       status: "failed",
-      note: "Telegram вернул ошибку доставки. Проверь token, chat_id и то, что пользователь ранее начал диалог с ботом.",
+      note: "Telegram вернул ошибку доставки. Проверь bot token, права бота и то, что пользователь ранее начал диалог с ботом.",
       sentAt: null,
     };
   }
+}
+
+async function resolveTelegramChatId() {
+  if (TELEGRAM_CHAT_ID) {
+    return TELEGRAM_CHAT_ID;
+  }
+
+  if (resolvedTelegramChatId) {
+    return resolvedTelegramChatId;
+  }
+
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_TARGET_USERNAME) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    const payload = (await response.json()) as TelegramUpdatesResponse;
+
+    if (!response.ok || payload.ok !== true || !Array.isArray(payload.result)) {
+      return null;
+    }
+
+    for (const update of [...payload.result].reverse()) {
+      for (const message of [update.message, update.edited_message]) {
+        if (!message || message.chat?.type !== "private") {
+          continue;
+        }
+
+        const username = normalizeTelegramUsername(message.from?.username ?? message.chat?.username);
+        const chatId = normalizeTelegramChatId(message.chat?.id);
+
+        if (username === TELEGRAM_TARGET_USERNAME && chatId) {
+          resolvedTelegramChatId = chatId;
+          return resolvedTelegramChatId;
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeText(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function normalizeTelegramUsername(value: string | null | undefined) {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.replace(/^@/, "").trim().toLowerCase()
+    : "";
+}
+
+function normalizeTelegramChatId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  return null;
 }
 
 function round1(value: number) {
