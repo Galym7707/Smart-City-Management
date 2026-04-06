@@ -2127,6 +2127,30 @@ body {
   justify-self: start;
 }
 
+.traffic-corridor-action {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(87, 166, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(71, 166, 255, 0.14);
+  color: #dcecff;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.traffic-corridor-action:hover,
+.traffic-corridor-action:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(87, 166, 255, 0.44);
+  background: rgba(71, 166, 255, 0.2);
+  outline: none;
+}
+
 .map-shell:fullscreen .map-selection-card,
 .map-shell-fullscreen .map-selection-card {
   left: 24px;
@@ -6428,12 +6452,104 @@ body {
   white-space: nowrap;
 }
 
+.traffic-live-video-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at center, rgba(82, 112, 255, 0.08), transparent 52%),
+    #060d17;
+}
+
+.traffic-live-video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.traffic-live-video-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.traffic-live-video-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.traffic-live-video-head span {
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(163, 181, 201, 0.78);
+}
+
+.traffic-live-video-head strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.04rem;
+}
+
+.traffic-live-video-chip {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(233, 240, 248, 0.82);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+
+.traffic-live-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(6, 13, 23, 0.72), rgba(6, 13, 23, 0.9));
+}
+
+.traffic-live-loading strong {
+  font-size: 1.12rem;
+}
+
+.traffic-live-loading p {
+  margin: 0;
+  max-width: 34ch;
+  color: rgba(204, 217, 230, 0.78);
+  line-height: 1.6;
+}
+
+.traffic-live-player,
 .traffic-live-frame {
   width: 100%;
-  min-height: 860px;
+  min-height: 420px;
+  aspect-ratio: 16 / 9;
   border: 0;
   border-radius: 22px;
+  display: block;
+  object-fit: cover;
+  opacity: 0.16;
+  transition: opacity 180ms ease;
   background: #060d17;
+}
+
+.traffic-live-player-ready,
+.traffic-live-frame-ready {
+  opacity: 1;
 }
 
 .traffic-live-fallback {
@@ -6531,8 +6647,16 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .traffic-live-video-grid {
+    grid-template-columns: 1fr;
+  }
+
   .traffic-live-frame {
-    min-height: 720px;
+    min-height: 360px;
+  }
+
+  .traffic-live-player {
+    min-height: 360px;
   }
 }
 
@@ -6550,7 +6674,16 @@ body {
     justify-items: start;
   }
 
+  .traffic-live-video-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .traffic-live-frame {
-    min-height: 540px;
+    min-height: 280px;
+  }
+
+  .traffic-live-player {
+    min-height: 280px;
   }
 }

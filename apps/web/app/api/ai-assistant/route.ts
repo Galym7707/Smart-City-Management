@@ -137,6 +137,9 @@ function buildPrompt(module: AiModuleContext, question?: string | null) {
     "Не выдумывай цифры, районы, причины, службы или источники, которых нет в контексте.",
     "Если данных не хватает, прямо скажи об ограничении в том поле, где это важно.",
     "Смотри на ситуацию глазами акимата: что происходит, насколько срочно, что нужно сделать сегодня.",
+    "whatIsHappening должен быть коротким, до 2 предложений, и объяснять управленческий смысл, а не заново перечислять все метрики.",
+    "severityReason должен объяснять именно причину срочности и не повторять текст whatIsHappening дословно.",
+    "crossModuleInsight должен говорить только о связи с другими модулями и не дублировать whatIsHappening или severityReason.",
     "recommendedActions должны быть ровно из 3 строк, каждая строка начинается с глагола и по возможности указывает ответственного или горизонт действия.",
     "Избегай пустых формулировок вроде 'усилить мониторинг', если не можешь привязать их к фактам или зоне ответственности.",
     "Если в контексте одновременно есть грязный воздух и сильные пробки, допускается рекомендация для детей, пожилых и людей с респираторными рисками.",
@@ -183,19 +186,41 @@ function normalizeGeminiResponse(
 ): AiAssistantResponse {
   const recommendedActions = normalizeActions(parsed.recommendedActions, module);
   const severity = normalizeSeverity(parsed.severity, module.defaultSeverity);
+  const whatIsHappening = normalizeText(
+    parsed.whatIsHappening,
+    module.findings[0] || module.overview,
+  );
+  const severityReasonFallback = pickDistinctText(
+    module.severityReasonHint,
+    [whatIsHappening],
+    buildGenericSeverityReason(module.defaultSeverity),
+  );
+  const severityReason = pickDistinctText(
+    normalizeText(parsed.severityReason, severityReasonFallback),
+    [whatIsHappening],
+    severityReasonFallback,
+  );
+  const crossModuleFallback = pickDistinctText(
+    module.crossModuleSignals[0] || module.overview,
+    [whatIsHappening, severityReason],
+    module.overview,
+  );
+  const crossModuleInsight = pickDistinctText(
+    normalizeText(parsed.crossModuleInsight, crossModuleFallback),
+    [whatIsHappening, severityReason],
+    crossModuleFallback,
+  );
+  const sanitizedSeverityReason =
+    module.featureId === "air-quality" && containsOperationalMetrics(severityReason)
+      ? severityReasonFallback
+      : severityReason;
 
   const summary: AiAssistantSummary = {
-    whatIsHappening: normalizeText(
-      parsed.whatIsHappening,
-      module.findings.slice(0, 2).join(" "),
-    ),
+    whatIsHappening,
     severity,
-    severityReason: normalizeText(parsed.severityReason, module.severityReasonHint),
+    severityReason: sanitizedSeverityReason,
     recommendedActions,
-    crossModuleInsight: normalizeText(
-      parsed.crossModuleInsight,
-      module.crossModuleSignals[0] || module.overview,
-    ),
+    crossModuleInsight,
   };
 
   return {
@@ -254,6 +279,66 @@ function normalizeActions(value: unknown, module: AiModuleContext) {
   }
 
   return fallback;
+}
+
+function buildGenericSeverityReason(severity: AiSeverity) {
+  switch (severity) {
+    case "Критическая":
+      return "Нужна немедленная реакция штаба в текущем оперативном окне.";
+    case "Высокая":
+      return "Нужна приоритетная реакция сегодня, пока сигнал не перешёл в более тяжёлый сценарий.";
+    case "Средняя":
+      return "Нужны превентивные действия и контроль в течение дня без аварийного режима.";
+    default:
+      return "Достаточно фонового наблюдения без срочной эскалации.";
+  }
+}
+
+function pickDistinctText(candidate: string, usedTexts: string[], fallback: string) {
+  if (usedTexts.some((used) => isTextTooSimilar(candidate, used))) {
+    return fallback;
+  }
+
+  return candidate;
+}
+
+function isTextTooSimilar(left: string, right: string) {
+  const leftTokens = tokenizeText(left);
+  const rightTokens = tokenizeText(right);
+
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+
+  const overlap = leftTokens.filter((token) => rightTokens.includes(token)).length;
+  const ratio = overlap / Math.min(leftTokens.length, rightTokens.length);
+  return ratio >= 0.7;
+}
+
+function tokenizeText(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s%]/gu, " ")
+        .split(/\s+/)
+        .filter((token) => token.length >= 4 || /\d/.test(token)),
+    ),
+  );
+}
+
+function containsOperationalMetrics(value: string) {
+  const normalized = value.toLowerCase();
+  return [
+    "aqi",
+    "pm2.5",
+    "pm10",
+    "jam score",
+    "индекс пробки",
+    "мкг/м³",
+    "µg/m³",
+    "%",
+  ].some((token) => normalized.includes(token));
 }
 
 function buildFallbackAssistantMessage(

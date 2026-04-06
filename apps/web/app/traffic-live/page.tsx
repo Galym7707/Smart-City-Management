@@ -14,6 +14,8 @@ type LiveDashboardStatus = {
 };
 
 const DEFAULT_LIVE_DASHBOARD_URL = "http://127.0.0.1:5000";
+const SOURCE_VIDEO_URL = "/api/traffic-jams/source-video";
+const ANNOTATED_VIDEO_URL = "/api/traffic-jams/annotated-video";
 
 function formatAlmatyTime(value?: string) {
   if (!value) {
@@ -60,9 +62,50 @@ function humanizeTrafficClass(className: "car" | "motorcycle" | "bus" | "truck")
   }
 }
 
+function summarizeDetections(detections: TrafficJamSnapshot["detections"]) {
+  const order: Array<keyof TrafficJamSnapshot["counts"]> = ["car", "motorcycle", "bus", "truck"];
+  const summary = new Map<
+    keyof TrafficJamSnapshot["counts"],
+    {
+      count: number;
+      maxConfidence: number;
+    }
+  >();
+
+  for (const detection of detections) {
+    const current = summary.get(detection.className) ?? {
+      count: 0,
+      maxConfidence: 0,
+    };
+
+    summary.set(detection.className, {
+      count: current.count + 1,
+      maxConfidence: Math.max(current.maxConfidence, detection.confidence),
+    });
+  }
+
+  return order
+    .map((className) => {
+      const item = summary.get(className);
+      if (!item) {
+        return null;
+      }
+
+      return {
+        className,
+        label: humanizeTrafficClass(className),
+        count: item.count,
+        maxConfidence: Math.round(item.maxConfidence * 100),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
 export default function TrafficLivePage() {
   const [snapshot, setSnapshot] = useState<TrafficJamSnapshot | null>(null);
   const [liveStatus, setLiveStatus] = useState<LiveDashboardStatus | null>(null);
+  const [sourceVideoState, setSourceVideoState] = useState<"loading" | "ready" | "error">("loading");
+  const [annotatedVideoState, setAnnotatedVideoState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     let cancelled = false;
@@ -119,8 +162,8 @@ export default function TrafficLivePage() {
   const densityPct = Math.round((snapshot?.density ?? 0) * 100);
   const jamScore = Math.round(snapshot?.jam.score ?? 0);
   const updatedAt = formatAlmatyTime(snapshot?.updatedAt);
-  const liveUrl = liveStatus?.url ?? DEFAULT_LIVE_DASHBOARD_URL;
   const detections = snapshot?.detections.slice(0, 8) ?? [];
+  const detectionSummary = summarizeDetections(detections);
   const counts = snapshot?.counts ?? { car: 0, motorcycle: 0, bus: 0, truck: 0 };
 
   return (
@@ -133,8 +176,8 @@ export default function TrafficLivePage() {
           <span className="traffic-live-eyebrow">trafficjams live monitoring</span>
           <h1>Восточный видеоконтур trafficjams</h1>
           <p>
-            Отдельный экран для видео, индекса пробки и текущих CV-детекций по
-            подключённому рабочему узлу.
+            Здесь теперь два слоя одновременно: исходное видео как нормальный плеер и AI-поток
+            с YOLOv8-разметкой, индексом пробки и детекциями транспорта.
           </p>
         </div>
 
@@ -154,29 +197,103 @@ export default function TrafficLivePage() {
         <div className="traffic-live-stage">
           <div className="traffic-live-stage-head">
             <div>
-              <span>видео и annotated feed</span>
-              <strong>Live dashboard trafficjams</strong>
+              <span>исходное видео и annotated feed</span>
+              <strong>Trafficjams video monitoring</strong>
             </div>
             <div className="traffic-live-stage-tag" style={{ "--traffic-tone": trafficState.color } as CSSProperties}>
               {trafficState.label}
             </div>
           </div>
 
-          {liveStatus?.available ? (
-            <iframe
-              className="traffic-live-frame"
-              src={liveUrl}
-              title="trafficjams live dashboard"
-            />
-          ) : (
-            <div className="traffic-live-fallback">
-              <strong>Локальный видеоконтур сейчас недоступен</strong>
-              <p>
-                Snapshot trafficjams продолжает читаться, но встроенный live-dashboard
-                на `127.0.0.1:5000` сейчас не отвечает.
-              </p>
-            </div>
-          )}
+          <div className="traffic-live-video-grid">
+            <section className="traffic-live-video-panel">
+              <div className="traffic-live-video-head">
+                <div>
+                  <span>исходное видео</span>
+                  <strong>traffic_video.MOV</strong>
+                </div>
+                <div className="traffic-live-video-chip">Видео</div>
+              </div>
+
+              <div className="traffic-live-video-shell">
+                {sourceVideoState !== "ready" ? (
+                  <div className="traffic-live-loading">
+                    <strong>
+                      {sourceVideoState === "error"
+                        ? "Исходное видео не открылось"
+                        : "Загружаем исходный видеоряд"}
+                    </strong>
+                    <p>
+                      {sourceVideoState === "error"
+                        ? "Браузер не смог открыть локальный source-video поток."
+                        : "Это отдельный видео-плеер из файла traffic_video.MOV, а не поток картинок MJPEG."}
+                    </p>
+                  </div>
+                ) : null}
+
+                <video
+                  className={`traffic-live-player ${sourceVideoState === "ready" ? "traffic-live-player-ready" : ""}`}
+                  src={SOURCE_VIDEO_URL}
+                  autoPlay
+                  controls
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                  onLoadedData={() => {
+                    setSourceVideoState("ready");
+                  }}
+                  onError={() => {
+                    setSourceVideoState("error");
+                  }}
+                />
+              </div>
+            </section>
+
+            <section className="traffic-live-video-panel">
+              <div className="traffic-live-video-head">
+                <div>
+                  <span>AI annotated video</span>
+                  <strong>YOLOv8 detections on video</strong>
+                </div>
+                <div className="traffic-live-video-chip">AI</div>
+              </div>
+
+              <div className="traffic-live-video-shell">
+                {annotatedVideoState !== "ready" ? (
+                  <div className="traffic-live-loading">
+                    <strong>
+                      {annotatedVideoState === "error"
+                        ? "AI-видео не открылось"
+                        : "Загружаем AI annotated video"}
+                    </strong>
+                    <p>
+                      {annotatedVideoState === "error"
+                        ? "Файл с YOLO-разметкой не открылся в браузере."
+                        : "Это уже не MJPEG-картинка, а нормальное видео с движущимися боксами и детекциями на каждом кадре."}
+                    </p>
+                  </div>
+                ) : null}
+
+                <video
+                  className={`traffic-live-player ${annotatedVideoState === "ready" ? "traffic-live-player-ready" : ""}`}
+                  src={ANNOTATED_VIDEO_URL}
+                  autoPlay
+                  controls
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                  onLoadedData={() => {
+                    setAnnotatedVideoState("ready");
+                  }}
+                  onError={() => {
+                    setAnnotatedVideoState("error");
+                  }}
+                />
+              </div>
+            </section>
+          </div>
         </div>
 
         <aside className="traffic-live-sidebar">
@@ -227,11 +344,13 @@ export default function TrafficLivePage() {
           <div className="traffic-live-card">
             <span>Детекции в кадре</span>
             <div className="traffic-live-detection-list">
-              {detections.length > 0 ? (
-                detections.map((detection, index) => (
-                  <div className="traffic-live-detection-row" key={`${detection.className}-${index}`}>
-                    <strong>{humanizeTrafficClass(detection.className)}</strong>
-                    <span>{Math.round(detection.confidence * 100)}%</span>
+              {detectionSummary.length > 0 ? (
+                detectionSummary.map((item) => (
+                  <div className="traffic-live-detection-row" key={item.className}>
+                    <strong>{item.label}</strong>
+                    <span>
+                      {item.count} шт. · до {item.maxConfidence}%
+                    </span>
                   </div>
                 ))
               ) : (

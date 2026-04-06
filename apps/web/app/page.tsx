@@ -190,6 +190,72 @@ function getTrafficState(score: number) {
   return { label: "Свободный поток", color: "#4ade80", severity: "Низкая" as AiSeverity };
 }
 
+function resolveFeatureFromQuestion(question: string, fallback: FeatureId): FeatureId {
+  const normalized = question.toLowerCase();
+
+  const rules: Array<{ featureId: FeatureId; keywords: string[] }> = [
+    {
+      featureId: "air-quality",
+      keywords: ["воздух", "aqi", "pm2.5", "pm10", "air", "смог", "загряз", "маск", "качеств"],
+    },
+    {
+      featureId: "cv-accidents",
+      keywords: ["пробк", "traffic", "jam", "трафик", "дтп", "авари", "машин"],
+    },
+    {
+      featureId: "risk-workflow",
+      keywords: ["безопас", "драк", "ссор", "crime", "патрул", "камера", "полици", "конфликт"],
+    },
+    {
+      featureId: "forecast-center",
+      keywords: ["ям", "pothole", "ремонт", "асфальт", "дорожн"],
+    },
+    {
+      featureId: "report-studio",
+      keywords: ["отч", "report", "pdf", "docx", "сводк", "выгруз"],
+    },
+    {
+      featureId: "ch4-map",
+      keywords: ["ch4", "метан", "methane", "flare", "утеч", "tropomi", "viirs", "nightfire"],
+    },
+  ];
+
+  for (const rule of rules) {
+    if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
+      return rule.featureId;
+    }
+  }
+
+  return fallback;
+}
+
+function buildHealthAlertTriggerText(alert: HealthAlertSnapshot) {
+  const pm25 = alert.metrics.pm25;
+  const jamScore = alert.metrics.jamScore;
+
+  if (alert.active) {
+    return `Сработал, потому что PM2.5 ${pm25} µg/m³ выше порога 15 µg/m³, а индекс пробки ${jamScore}% выше порога 65%.`;
+  }
+
+  return `Для включения нужны одновременно PM2.5 выше 15 µg/m³ и индекс пробки выше 65%. Сейчас как минимум одно из условий не выполнено.`;
+}
+
+function buildHealthAlertMeaningText(alert: HealthAlertSnapshot) {
+  if (alert.active && alert.severity === "Критическая") {
+    return "Это уже не просто наблюдение: у магистралей вырос риск для детей, пожилых и людей с болезнями лёгких или сердца, поэтому нужен быстрый городской ответ.";
+  }
+
+  if (alert.active) {
+    return "Выхлопная нагрузка у перегруженных дорог выросла, поэтому чувствительным группам лучше сократить время у магистралей и получить предупреждение заранее.";
+  }
+
+  if (alert.severity === "Средняя" || alert.severity === "Высокая") {
+    return "Сигналы уже требуют наблюдения в часы пик, чтобы не пропустить переход в полноценный alert-режим.";
+  }
+
+  return "Острого health-риска сейчас не видно, но связку воздуха и трафика система продолжает отслеживать автоматически.";
+}
+
 function humanizeTrafficClass(className: "car" | "motorcycle" | "bus" | "truck") {
   switch (className) {
     case "car":
@@ -282,6 +348,9 @@ function buildTrafficMonitoringPoints(
   const totalCount = trafficSnapshot?.totalCount ?? 8;
   const densityPct = Math.round((trafficSnapshot?.density ?? 0.18) * 100);
   const liveColor = getTrafficState(jamScore).color;
+  const liveCamera = trafficSnapshot?.cameraLocation;
+  const liveLongitude = liveCamera?.longitude ?? 77.084;
+  const liveLatitude = liveCamera?.latitude ?? 43.309;
 
   return [
     {
@@ -362,8 +431,8 @@ function buildTrafficMonitoringPoints(
     {
       id: "traffic-east-live",
       label: "Восточный видеоконтур",
-      latitude: 43.309,
-      longitude: 77.084,
+      latitude: liveLatitude,
+      longitude: liveLongitude,
       value: `${jamScore}% индекс пробки`,
       category: "Активный видеоконтур",
       description: "Рабочий узел: открывает экран live-мониторинга trafficjams с видео и детекциями.",
@@ -373,6 +442,10 @@ function buildTrafficMonitoringPoints(
         { label: "Машин в кадре", value: String(totalCount) },
         { label: "Плотность", value: `${densityPct}%` },
         { label: "Обновлено", value: updatedAt },
+        {
+          label: "Точка камеры",
+          value: liveCamera ? liveCamera.label : "Рабочий узел trafficjams",
+        },
       ],
     },
   ];
@@ -722,12 +795,20 @@ function buildAiModuleContext(
       const pm10Value = airSnapshot?.pm10Avg ?? 0;
       const stationsTotal = airSnapshot?.stationsTotal ?? 0;
       const pm25Multiple = pm25Value > 0 ? (pm25Value / WHO_PM25_GUIDELINE).toFixed(1) : "0.0";
+      const airSeverityReason =
+        healthInsight.severity === "Критическая"
+          ? "Нужна немедленная реакция по воздуху и трафику в одном контуре, пока нагрузка у магистралей не усилилась ещё сильнее."
+          : healthInsight.severity === "Высокая"
+            ? "Нужны приоритетные действия сегодня: предупредить группы риска и связать экологический сигнал с транспортным штабом."
+            : healthInsight.severity === "Средняя"
+              ? "Ситуация требует наблюдения в часы пик и превентивных шагов без аварийной эскалации."
+              : "Достаточно фонового наблюдения без срочных ограничений.";
       return {
         featureId,
         featureLabel: feature.label,
         overview: feature.overview,
         defaultSeverity: healthInsight.severity,
-        severityReasonHint: healthInsight.summary,
+        severityReasonHint: airSeverityReason,
         metrics: [
           {
             label: "AQI Алматы",
@@ -983,13 +1064,13 @@ function getTelegramAlertLabel(
 ) {
   switch (status) {
     case "sent":
-      return "Telegram отправлен";
+      return "Уведомление отправлено";
     case "cooldown":
-      return "Telegram защищён";
+      return "Повтор защищён";
     case "failed":
-      return "Telegram ошибка";
+      return "Ошибка доставки";
     case "not-configured":
-      return "Telegram не подключен";
+      return active ? "Alert активен" : "Наблюдение";
     default:
       return active ? "Alert активен" : "Наблюдение";
   }
@@ -997,7 +1078,7 @@ function getTelegramAlertLabel(
 
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 export default function Page() {
-  const [activeFeature, setActiveFeature] = useState<FeatureId>("ch4-map");
+  const [activeFeature, setActiveFeature] = useState<FeatureId>("air-quality");
   const [chatOpen, setChatOpen] = useState(true);
   const [selectedFaq, setSelectedFaq] = useState<string>(FAQ_ITEMS[0].id);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1186,9 +1267,9 @@ export default function Page() {
     recommendedActions: [
       "Дождаться загрузки свежих данных.",
       "Сверить состояние воздуха и дорожной перегрузки.",
-      "Проверить статус Telegram-доставки после активации alert-режима.",
+      "Проверить статус канала уведомления после активации alert-режима.",
     ],
-    telegramMessagePreview: "Telegram preview будет доступен после первой health-сводки.",
+    telegramMessagePreview: "Текст уведомления будет доступен после первой health-сводки.",
     observedAt: new Date().toISOString(),
     metrics: {
       aqi: 0,
@@ -1282,6 +1363,14 @@ export default function Page() {
     const text = chatInput.trim();
     if (!text || chatLoading) return;
     setChatInput("");
+    const chatFeature = resolveFeatureFromQuestion(text, activeFeature);
+    const chatModuleContext = buildAiModuleContext(
+      chatFeature,
+      dashboardState,
+      airSnapshot,
+      trafficSnapshot,
+      crimeSnapshot,
+    );
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -1290,8 +1379,11 @@ export default function Page() {
       ts: new Date(),
     };
     setChatMessages((prev) => [...prev, userMsg]);
+    if (chatFeature !== activeFeature) {
+      setActiveFeature(chatFeature);
+    }
     await requestAiAssistant({
-      module: activeModuleContext,
+      module: chatModuleContext,
       question: text,
       mode: "chat",
     });
@@ -1551,12 +1643,6 @@ export default function Page() {
             </span>
           </div>
 
-          <p className="scm-health-alert-summary">
-            {healthAlertLoading && !healthAlert
-              ? "Health-alert анализирует воздух и пробки..."
-              : visibleHealthAlert.summary}
-          </p>
-
           <div className="scm-health-alert-metrics">
             <div className="scm-health-alert-metric">
               <span>AQI</span>
@@ -1578,35 +1664,30 @@ export default function Page() {
 
           <div className="scm-health-alert-card">
             <div className="scm-ai-summary-label">
-              <span>Почему alert активен</span>
-              <HelpHint text="Здесь объясняется логика срабатывания alert-режима и что именно система увидела в реальных данных." />
+              <span>Логика срабатывания</span>
+              <HelpHint text="Здесь показаны условия, по которым автоматический alert включается или остаётся в режиме наблюдения." />
             </div>
-            <p>{visibleHealthAlert.reasoning}</p>
+            <p>
+              {healthAlertLoading && !healthAlert
+                ? "Health-alert анализирует воздух и пробки..."
+                : buildHealthAlertTriggerText(visibleHealthAlert)}
+            </p>
           </div>
 
           <div className="scm-health-alert-card">
             <div className="scm-ai-summary-label">
-              <span>Telegram</span>
-              <HelpHint text="Статус доставки жителю. Для личного Telegram нужен bot token. Если chat_id не задан вручную, система попробует связать @username с private chat через getUpdates после команды /start у бота." />
+              <span>Что это значит</span>
+              <HelpHint text="Короткое объяснение для штаба: почему это состояние важно для города и уязвимых групп." />
             </div>
-            <p>{visibleHealthAlert.telegram.note}</p>
-            <div className="scm-health-alert-telegram-meta">
-              <span>
-                Цель: {visibleHealthAlert.telegram.targetLabel ?? "не задана"}
-              </span>
-              <span>
-                Последняя отправка: {formatAlmatyTime(visibleHealthAlert.telegram.sentAt ?? undefined)}
-              </span>
-            </div>
+            <p>{buildHealthAlertMeaningText(visibleHealthAlert)}</p>
           </div>
 
-          <div className="scm-ai-actions">
-            {visibleHealthAlert.recommendedActions.map((item, index) => (
-              <div className="scm-ai-action" key={`${item}-${index}-health`}>
-                <span>{index + 1}</span>
-                <p>{item}</p>
-              </div>
-            ))}
+          <div className="scm-health-alert-card">
+            <div className="scm-ai-summary-label">
+              <span>Текст уведомления</span>
+              <HelpHint text="Предпросмотр короткого сообщения для жителя при активном alert-режиме." />
+            </div>
+            <p>{visibleHealthAlert.telegramMessagePreview}</p>
           </div>
         </section>
 
@@ -1855,7 +1936,9 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
 
   useEffect(() => {
     if (!trafficMapPoints.some((point) => point.id === selectedTrafficPointId)) {
-      setSelectedTrafficPointId(trafficMapPoints.find((point) => point.mode === "pilot")?.id ?? trafficMapPoints[0]?.id ?? "");
+      setSelectedTrafficPointId(
+        trafficMapPoints.find((point) => point.mode === "pilot")?.id ?? trafficMapPoints[0]?.id ?? "",
+      );
     }
   }, [selectedTrafficPointId, trafficMapPoints]);
 
@@ -1919,14 +2002,14 @@ function CvAccidentsPanel({ trafficSnapshot }: { trafficSnapshot: TrafficJamSnap
       <div className="scm-section-stack">
         <SectionHeading
           title="Карта CV-наблюдения"
-          help="Карта показывает транспортные узлы с приоритетом по перегрузке. Крайний восточный рабочий узел открывает live-видеоконтур trafficjams."
+          help="Карта показывает цветные транспортные точки с приоритетом по перегрузке. Чем горячее цвет, тем сильнее пробка на направлении. Восточный live-узел открывает видеомониторинг."
         />
         <SignalMap
           points={trafficMapPoints}
           selectedPointId={selectedTrafficPointId}
           onSelectPoint={handleTrafficPointSelect}
           selectionLabel="Транспортный узел"
-          footerHint="Крайний правый узел открывает live-мониторинг trafficjams. Остальные точки показывают приоритетные направления для расширения городского CV-контроля."
+          footerHint="Цвет точки показывает силу перегрузки: жёлтый — умеренно, оранжевый — плотно, красный — сильная пробка. Восточный live-узел открывает видеомониторинг."
           emptyState={{
             title: "Транспортные узлы не загружены",
             description:

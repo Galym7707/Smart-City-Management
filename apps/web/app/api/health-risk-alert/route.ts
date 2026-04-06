@@ -14,8 +14,6 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim() || "";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim() || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID?.trim() || "";
-const TELEGRAM_TARGET_LABEL = process.env.TELEGRAM_TARGET_LABEL?.trim() || null;
-const TELEGRAM_TARGET_USERNAME = normalizeTelegramUsername(TELEGRAM_TARGET_LABEL);
 const ALERT_COOLDOWN_MINUTES = Number(process.env.TELEGRAM_ALERT_COOLDOWN_MINUTES ?? 120);
 const ALERT_COOLDOWN_MS =
   Number.isFinite(ALERT_COOLDOWN_MINUTES) && ALERT_COOLDOWN_MINUTES > 0
@@ -73,6 +71,11 @@ type TelegramDelivery = {
   sentAt: string | null;
 };
 
+type TelegramAudience = {
+  chatIds: string[];
+  freshMessages: TelegramPrivateMessage[];
+};
+
 type TelegramUpdatesResponse = {
   ok?: boolean;
   result?: TelegramUpdate[];
@@ -80,11 +83,13 @@ type TelegramUpdatesResponse = {
 };
 
 type TelegramUpdate = {
+  update_id?: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
 };
 
 type TelegramMessage = {
+  text?: string;
   chat?: {
     id?: number | string;
     type?: string;
@@ -95,9 +100,19 @@ type TelegramMessage = {
   };
 };
 
-let resolvedTelegramChatId = TELEGRAM_CHAT_ID;
+type TelegramPrivateMessage = {
+  updateId: number;
+  chatId: string;
+  username: string | null;
+  text: string;
+};
+
+let knownTelegramChatIds = new Set<string>(TELEGRAM_CHAT_ID ? [TELEGRAM_CHAT_ID] : []);
+let telegramAudiencePrimed = false;
+let lastProcessedTelegramUpdateId = 0;
 let lastSentFingerprint = "";
 let lastSentAt = 0;
+let lastSentByChat = new Map<string, { fingerprint: string; sentAt: number }>();
 
 export async function GET(request: NextRequest) {
   const origin = request.nextUrl.origin;
@@ -113,7 +128,15 @@ export async function GET(request: NextRequest) {
 
   const evaluation = evaluateHealthRisk(airSnapshot, trafficSnapshot);
   const content = await buildHealthAlertContent(airSnapshot, trafficSnapshot, evaluation);
-  const telegram = await maybeSendTelegramAlert(content.telegramMessage, evaluation);
+  const telegramAudience = await syncTelegramAudience();
+  const repliedChatIds = await maybeReplyToTelegramMessages(telegramAudience.freshMessages, content.telegramMessage);
+  const alertAudience = telegramAudience.chatIds.filter((chatId) => !repliedChatIds.has(chatId));
+  const telegram = await maybeSendTelegramAlert(
+    content.telegramMessage,
+    evaluation,
+    alertAudience,
+    repliedChatIds.size,
+  );
 
   const snapshot: HealthAlertSnapshot = {
     active: evaluation.active,
@@ -139,7 +162,7 @@ export async function GET(request: NextRequest) {
     },
     telegram: {
       status: telegram.status,
-      targetLabel: TELEGRAM_TARGET_LABEL,
+      targetLabel: telegramAudience.chatIds.length > 0 ? "все private-чаты бота" : null,
       note: telegram.note,
       sentAt: telegram.sentAt,
     },
@@ -272,6 +295,8 @@ function buildGeminiPrompt(
     "Используй только переданные цифры и факты.",
     "Нельзя выдумывать районы, источники, заболевания, службы или данные.",
     "Разделяй наблюдаемое и вывод: наблюдаемое — AQI, PM2.5, PM10 и индекс пробки; вывод — что это означает для города.",
+    "summary должен быть коротким, без повторного перечисления всех цифр, и отвечать на вопрос: что это значит для города прямо сейчас.",
+    "reasoning должен объяснять только логику срабатывания alert: какие условия выполнены или не выполнены. Не повторяй summary.",
     "Рекомендуемые действия должны быть простыми и пригодными для акимата сегодня.",
     "Можно советовать сократить время у магистралей и использовать маски как осторожную профилактическую меру при плохом воздухе и сильных пробках.",
     "Не ставь диагнозы и не выдавай медицинские гарантии.",
@@ -339,12 +364,12 @@ function buildFallbackHealthContent(
   const jamText = `${round1(evaluation.jamScore)}%`;
 
   const summary = evaluation.active
-    ? `В Алматы одновременно фиксируются повышенный PM2.5 (${pm25Text}) и сильная дорожная перегрузка (${jamText}). Это повышает выхлопную нагрузку рядом с загруженными магистралями и усиливает риск для чувствительных групп населения.`
-    : `Сейчас health-alert по Алматы остаётся в режиме наблюдения: AQI ${aqiText}, PM2.5 ${pm25Text}, индекс пробки ${jamText}. Для автоматической эскалации нужны одновременно грязный воздух и сильная дорожная перегрузка.`;
+    ? "Грязный воздух совпал с сильной дорожной перегрузкой, поэтому рядом с магистралями вырос риск для чувствительных групп."
+    : "Система держит воздух и трафик под наблюдением, но alert-режим пока не включён.";
 
   const reasoning = evaluation.active
-    ? `PM2.5 выше ориентира ВОЗ 15 µg/m³ для 24-часового окна, а индекс пробки указывает на сильную дорожную перегрузку. Для детей, пожилых и людей с болезнями сердца или лёгких это означает повышенный риск рядом с загруженными дорогами.`
-    : `Система не поднимает alert, потому что одно из двух условий недостаточно выражено. Логика смотрит именно на сочетание воздуха и пробок, а не на один сигнал в отрыве от другого.`;
+    ? `Alert сработал, потому что PM2.5 ${pm25Text} выше порога 15 µg/m³, а индекс пробки ${jamText} выше порога 65%.`
+    : `Alert включается только когда одновременно PM2.5 выше 15 µg/m³ и индекс пробки выше 65%. Сейчас как минимум одно из этих условий не выполнено.`;
 
   const recommendedActions = evaluation.active
     ? [
@@ -376,11 +401,13 @@ function buildFallbackHealthContent(
 async function maybeSendTelegramAlert(
   message: string,
   evaluation: HealthEvaluation,
+  chatIds: string[],
+  repliedChatCount: number,
 ): Promise<TelegramDelivery> {
   if (!evaluation.active) {
     return {
       status: "not-triggered",
-      note: "Telegram не отправлялся: одновременно высокий PM2.5 и сильная пробка сейчас не дали alert-режим.",
+      note: "Alert-рассылка не запускалась: одновременно высокий PM2.5 и сильная пробка сейчас не дали alert-режим.",
       sentAt: null,
     };
   }
@@ -393,107 +420,230 @@ async function maybeSendTelegramAlert(
     };
   }
 
-  const resolvedChatId = await resolveTelegramChatId();
-  if (!resolvedChatId) {
+  if (chatIds.length === 0 && repliedChatCount > 0) {
+    return {
+      status: "sent",
+      note: "Новые входящие сообщения уже получили ответ; отдельная alert-рассылка в этом цикле не дублировалась.",
+      sentAt: new Date().toISOString(),
+    };
+  }
+
+  if (chatIds.length === 0) {
     return {
       status: "not-configured",
       note:
-        "Telegram не подключен до конца: нужен numeric chat_id или bot token с доступным getUpdates. Если цель — личный Telegram, открой бота и нажми /start, тогда username можно будет связать с chat_id автоматически.",
+        "У бота пока нет подписанных private-пользователей. Любой пользователь должен открыть бота и отправить /start или любое сообщение.",
       sentAt: null,
     };
   }
 
   const now = Date.now();
-  if (lastSentFingerprint === evaluation.fingerprint && now - lastSentAt < ALERT_COOLDOWN_MS) {
-    return {
-      status: "cooldown",
-      note: "Telegram уже отправлялся по этому состоянию; повтор подавлен cooldown-защитой.",
-      sentAt: new Date(lastSentAt).toISOString(),
-    };
-  }
+  let sentCount = 0;
+  let cooldownCount = 0;
+  let failedCount = 0;
+  let latestSentAt: string | null = null;
 
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: resolvedChatId,
-        text: message,
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
-
-    const payload = await response.json();
-    if (!response.ok || payload?.ok !== true) {
-      throw new Error(payload?.description || "Telegram delivery failed.");
+  for (const chatId of chatIds) {
+    const previous = lastSentByChat.get(chatId);
+    if (
+      previous &&
+      previous.fingerprint === evaluation.fingerprint &&
+      now - previous.sentAt < ALERT_COOLDOWN_MS
+    ) {
+      cooldownCount += 1;
+      latestSentAt = latestSentAt ?? new Date(previous.sentAt).toISOString();
+      continue;
     }
 
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error(payload?.description || "Telegram delivery failed.");
+      }
+
+      sentCount += 1;
+      lastSentByChat.set(chatId, {
+        fingerprint: evaluation.fingerprint,
+        sentAt: now,
+      });
+      latestSentAt = new Date(now).toISOString();
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  if (sentCount > 0) {
     lastSentFingerprint = evaluation.fingerprint;
     lastSentAt = now;
-
     return {
       status: "sent",
-      note: TELEGRAM_CHAT_ID
-        ? "Telegram-уведомление отправлено по активному health-alert состоянию."
-        : `Telegram-уведомление отправлено после автоматического определения chat_id для ${TELEGRAM_TARGET_LABEL ?? "целевого пользователя"}.`,
-      sentAt: new Date(now).toISOString(),
-    };
-  } catch {
-    return {
-      status: "failed",
-      note: "Telegram вернул ошибку доставки. Проверь bot token, права бота и то, что пользователь ранее начал диалог с ботом.",
-      sentAt: null,
+      note:
+        cooldownCount > 0
+          ? `Уведомление отправлено в ${sentCount} private-чатов; ещё для ${cooldownCount} повтор подавлен cooldown-защитой.`
+          : `Уведомление отправлено в ${sentCount} private-чатов.`,
+      sentAt: latestSentAt,
     };
   }
+
+  if (cooldownCount > 0 && failedCount === 0) {
+    return {
+      status: "cooldown",
+      note: `Повтор уведомления подавлен cooldown-защитой для ${cooldownCount} private-чатов.`,
+      sentAt: latestSentAt,
+    };
+  }
+
+  return {
+    status: "failed",
+    note:
+      failedCount > 0
+        ? `Не удалось доставить уведомление в ${failedCount} private-чатов. Проверь права бота и доступность Telegram API.`
+        : "Не удалось определить получателей для отправки уведомления.",
+    sentAt: latestSentAt,
+  };
 }
 
-async function resolveTelegramChatId() {
-  if (TELEGRAM_CHAT_ID) {
-    return TELEGRAM_CHAT_ID;
-  }
-
-  if (resolvedTelegramChatId) {
-    return resolvedTelegramChatId;
-  }
-
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_TARGET_USERNAME) {
-    return null;
+async function syncTelegramAudience(): Promise<TelegramAudience> {
+  if (!TELEGRAM_BOT_TOKEN) {
+    return {
+      chatIds: TELEGRAM_CHAT_ID ? [TELEGRAM_CHAT_ID] : [],
+      freshMessages: [],
+    };
   }
 
   try {
-    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`, {
+    const url = new URL(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`);
+    if (telegramAudiencePrimed && lastProcessedTelegramUpdateId > 0) {
+      url.searchParams.set("offset", String(lastProcessedTelegramUpdateId + 1));
+    }
+
+    const response = await fetch(url, {
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
     const payload = (await response.json()) as TelegramUpdatesResponse;
 
     if (!response.ok || payload.ok !== true || !Array.isArray(payload.result)) {
-      return null;
+      return {
+        chatIds: Array.from(knownTelegramChatIds),
+        freshMessages: [],
+      };
     }
 
-    for (const update of [...payload.result].reverse()) {
+    const freshMessages: TelegramPrivateMessage[] = [];
+    let maxUpdateId = lastProcessedTelegramUpdateId;
+
+    for (const update of payload.result) {
+      if (typeof update.update_id === "number") {
+        maxUpdateId = Math.max(maxUpdateId, update.update_id);
+      }
+
       for (const message of [update.message, update.edited_message]) {
         if (!message || message.chat?.type !== "private") {
           continue;
         }
 
-        const username = normalizeTelegramUsername(message.from?.username ?? message.chat?.username);
         const chatId = normalizeTelegramChatId(message.chat?.id);
+        if (!chatId) {
+          continue;
+        }
 
-        if (username === TELEGRAM_TARGET_USERNAME && chatId) {
-          resolvedTelegramChatId = chatId;
-          return resolvedTelegramChatId;
+        knownTelegramChatIds.add(chatId);
+
+        if (telegramAudiencePrimed && typeof update.update_id === "number" && typeof message.text === "string") {
+          freshMessages.push({
+            updateId: update.update_id,
+            chatId,
+            username: normalizeTelegramUsername(message.from?.username ?? message.chat?.username) || null,
+            text: message.text.trim(),
+          });
         }
       }
     }
 
-    return null;
+    telegramAudiencePrimed = true;
+    lastProcessedTelegramUpdateId = maxUpdateId;
+
+    return {
+      chatIds: Array.from(knownTelegramChatIds),
+      freshMessages,
+    };
   } catch {
-    return null;
+    return {
+      chatIds: Array.from(knownTelegramChatIds),
+      freshMessages: [],
+    };
   }
+}
+
+async function maybeReplyToTelegramMessages(messages: TelegramPrivateMessage[], message: string) {
+  const repliedChatIds = new Set<string>();
+
+  if (!TELEGRAM_BOT_TOKEN || messages.length === 0) {
+    return repliedChatIds;
+  }
+
+  for (const entry of messages) {
+    if (!entry.text) {
+      continue;
+    }
+
+    try {
+      const replyText = buildTelegramReplyText(entry.text, message);
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chat_id: entry.chatId,
+          text: replyText,
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      });
+      repliedChatIds.add(entry.chatId);
+    } catch {
+      // MVP shortcut: silent reply failure should not break the health-alert route.
+    }
+  }
+
+  return repliedChatIds;
+}
+
+function buildTelegramReplyText(input: string, statusMessage: string) {
+  const normalized = input.trim().toLowerCase();
+
+  if (normalized.startsWith("/start")) {
+    return [
+      "Привет! Я бот Smart City Management Almaty.",
+      "Я показываю короткую сводку по воздуху и пробкам в Алматы и присылаю alert, когда загрязнение воздуха и дорожная перегрузка совпадают.",
+      "Напиши /status, чтобы получить текущую сводку прямо сейчас.",
+    ].join("\n\n");
+  }
+
+  if (normalized.startsWith("/status") || normalized.startsWith("/air") || normalized === "test") {
+    return statusMessage;
+  }
+
+  return [
+    "Я бот Smart City Management Almaty.",
+    "Напиши /status, чтобы получить текущую сводку по воздуху и пробкам в Алматы.",
+    statusMessage,
+  ].join("\n\n");
 }
 
 function normalizeText(value: unknown, fallback: string) {
